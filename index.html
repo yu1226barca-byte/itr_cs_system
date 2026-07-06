@@ -2716,6 +2716,9 @@
       }
     }
 
+  
+    /* v18: 同期安定化 */
+    #saveState { min-width: 110px; text-align: right; }
   </style>
 </head>
 <body class="auth-locked">
@@ -2843,7 +2846,7 @@
   measurementId: "G-DVV9HGK16T"
 };
 
-    const FIRESTORE_COLLECTION = "orderCustomerMaster";
+    const FIRESTORE_COLLECTION = "order_customer_records";
     const ALLOWED_EMAILS = ["yu1226barca@gmail.com"];
     let db = null;
     let cloudReady = false;
@@ -2852,6 +2855,10 @@
     let cloudSaveTimer = null;
     let lastRenderedSignature = "";
     let unsubscribeCloud = null;
+    let localEditUntil = 0;
+    let pendingRemotePayload = null;
+    let pendingRemoteTimer = null;
+    const REMOTE_APPLY_DELAY_MS = 3000;
     let auth = null;
     let currentUser = null;
     let authStarted = false;
@@ -2870,6 +2877,54 @@
     function setSaveState(text) {
       const el = document.getElementById("saveState");
       if (el) el.textContent = text;
+    }
+    function stableRecordsSignature(value) {
+      return JSON.stringify(value || [], (key, val) => {
+        if (["updatedAtServer", "updatedAtClient"].includes(key)) return undefined;
+        if (val && typeof val.toDate === "function") return undefined;
+        return val;
+      });
+    }
+
+    function noteLocalEdit() {
+      localEditUntil = Date.now() + REMOTE_APPLY_DELAY_MS;
+    }
+
+    function isEditingNow() {
+      const active = document.activeElement;
+      const activeIsInput = active && ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName);
+      return activeIsInput || Date.now() < localEditUntil;
+    }
+
+    function schedulePendingRemote() {
+      clearTimeout(pendingRemoteTimer);
+      pendingRemoteTimer = setTimeout(() => {
+        if (!pendingRemotePayload) return;
+        if (isEditingNow()) {
+          schedulePendingRemote();
+          return;
+        }
+        const payload = pendingRemotePayload;
+        pendingRemotePayload = null;
+        applyRemoteRecords(payload.records, new Set(payload.ids), payload.selectedId);
+      }, 900);
+    }
+
+    function applyRemoteRecords(remoteRecords, ids, selectedId) {
+      applyingRemote = true;
+      records = remoteRecords;
+      cloudKnownIds = ids;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+
+      const nextIndex = selectedId ? records.findIndex(r => r.id === selectedId) : currentIndex;
+      currentIndex = Math.max(0, nextIndex >= 0 ? nextIndex : Math.min(currentIndex, records.length - 1));
+
+      setupFilters();
+      renderRecord();
+      lastRenderedSignature = stableRecordsSignature(records);
+      applyingRemote = false;
+
+      setSaveState("リアルタイム同期済み " + new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }));
     }
 
     function setLoginError(message) {
@@ -3209,6 +3264,7 @@
     }
 
     function saveRecords() {
+      if (!applyingRemote) noteLocalEdit();
       localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
       setSaveState((cloudReady ? "同期待ち " : "端末内保存 ") + new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }));
 
@@ -3254,6 +3310,8 @@
 
         await batch.commit();
         cloudKnownIds = currentIds;
+        lastRenderedSignature = stableRecordsSignature(records);
+        localEditUntil = Date.now() + 1200;
         setSaveState("同期済み " + new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }));
       } catch (error) {
         console.error("Firestore save error:", error);
@@ -3312,27 +3370,21 @@
           remoteRecords.sort((a, b) => num(a.sortIndex) - num(b.sortIndex));
 
           const normalized = normalizeRecords(remoteRecords);
-          const signature = JSON.stringify(normalized);
+          const signature = stableRecordsSignature(normalized);
 
           if (signature === lastRenderedSignature) {
             setSaveState("同期済み " + new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }));
             return;
           }
 
-          applyingRemote = true;
-          records = normalized;
-          cloudKnownIds = ids;
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+          if (isEditingNow()) {
+            pendingRemotePayload = { records: normalized, ids: Array.from(ids), selectedId };
+            schedulePendingRemote();
+            setSaveState("入力中・同期保留 " + new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }));
+            return;
+          }
 
-          const nextIndex = selectedId ? records.findIndex(r => r.id === selectedId) : currentIndex;
-          currentIndex = Math.max(0, nextIndex >= 0 ? nextIndex : Math.min(currentIndex, records.length - 1));
-
-          setupFilters();
-          renderRecord();
-          lastRenderedSignature = JSON.stringify(records);
-          applyingRemote = false;
-
-          setSaveState("リアルタイム同期済み " + new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }));
+          applyRemoteRecords(normalized, ids, selectedId);
         }, error => {
           console.error("Firestore listen error:", error);
           setSaveState("同期エラー / 端末内保存");
@@ -3920,6 +3972,12 @@
     document.getElementById("noteSaveBtn").addEventListener("click", saveNote);
     document.getElementById("noteTimestampBtn").addEventListener("click", insertTimestamp);
     document.getElementById("noteModal").addEventListener("click", event => { if (event.target.id === "noteModal") closeNote(); });
+
+    window.addEventListener("beforeunload", () => {
+      if (cloudReady && !applyingRemote) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+      }
+    });
 
     setupFilters();
     renderRecord();
