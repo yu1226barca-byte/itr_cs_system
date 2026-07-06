@@ -3173,6 +3173,66 @@
       }
     }
 
+  
+    /* v29: 備考欄を強制的に枠内上部へ固定 */
+    .delivery-note .delivery-remarks-box {
+      display: flex !important;
+      flex-direction: column !important;
+      justify-content: flex-start !important;
+      align-items: stretch !important;
+      vertical-align: top !important;
+      padding-top: 5px !important;
+      padding-right: 4mm !important;
+      padding-bottom: 8px !important;
+      padding-left: 4mm !important;
+      min-height: 20mm !important;
+      height: auto !important;
+    }
+
+    .delivery-note .delivery-remarks-title {
+      display: block !important;
+      margin-top: 0 !important;
+      margin-right: 0 !important;
+      margin-bottom: 4px !important;
+      margin-left: 0 !important;
+      padding-top: 0 !important;
+      padding-right: 0 !important;
+      padding-bottom: 4px !important;
+      padding-left: 0 !important;
+      line-height: 1.2 !important;
+      vertical-align: top !important;
+    }
+
+    .delivery-note .delivery-remarks-content {
+      display: block !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      line-height: 1.45 !important;
+      vertical-align: top !important;
+      min-height: 0 !important;
+      height: auto !important;
+    }
+
+    @media print {
+      .delivery-note .delivery-remarks-box {
+        display: flex !important;
+        flex-direction: column !important;
+        justify-content: flex-start !important;
+        align-items: stretch !important;
+        padding-top: 5px !important;
+        padding-bottom: 8px !important;
+        min-height: 20mm !important;
+        height: auto !important;
+      }
+
+      .delivery-note .delivery-remarks-title,
+      .delivery-note .delivery-remarks-content {
+        margin-top: 0 !important;
+        padding-top: 0 !important;
+        vertical-align: top !important;
+      }
+    }
+
   </style>
 </head>
 <body class="auth-locked">
@@ -4076,9 +4136,9 @@
               <tbody>${rows}</tbody>
             </table>
 
-            <section class="delivery-remarks-box">
-              <div class="delivery-remarks-title">備考</div>
-              <div class="delivery-remarks-content">${esc(remarks || "")}</div>
+            <section class="delivery-remarks-box" style="display:flex;flex-direction:column;justify-content:flex-start;align-items:stretch;padding-top:5px;padding-bottom:8px;">
+              <div class="delivery-remarks-title" style="margin:0 0 4px 0;padding:0 0 4px 0;line-height:1.2;">備考</div>
+              <div class="delivery-remarks-content" style="margin:0;padding:0;line-height:1.45;display:block;">${esc(remarks || "")}</div>
             </section>
 
             <section class="delivery-acceptance">
