@@ -4667,7 +4667,7 @@
        - 名寄せ: customerName 完全一致 → aliases（別名・表記ゆれ）配列で検索
        - v2: 対応履歴は一覧=要約表示、編集は詳細モーダル（長文対応）
        - v3: 構成図・資料パス欄（NASパス保存・コピー / URLは開く）
-       - v4: モバイル対応（狭い画面ではカード表示）、機器編集もモーダル方式に統一
+       - v4.1: モバイル対応（狭い画面ではカード表示・!important強制適用）、機器編集もモーダル方式に統一
        ================================================================ */
     (function () {
       const KARTE_COLLECTION = "karte_customers";
@@ -4714,21 +4714,20 @@
         .karte-modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; flex-wrap: wrap; }
         /* ---- モバイル: テーブル→カード表示 ---- */
         @media (max-width: 760px) {
-          .karte-table, .karte-table tbody { display: block; width: 100%; }
-          .karte-table thead { display: none; }
-          .karte-table tr { display: block; border: 1px solid var(--line-dark); border-radius: 12px; margin-bottom: 8px; padding: 8px 10px; background: #fff; box-shadow: 0 4px 12px rgba(15,23,42,.05); }
-          .karte-table tr.karte-pending { background: #fffbeb; }
-          .karte-table tr.karte-pending td { background: transparent; }
-          .karte-table td { display: flex; gap: 8px; border: none; padding: 3px 0; font-size: 13px; min-height: 0; background: transparent; }
+          .karte-table, .karte-table tbody { display: block !important; width: 100% !important; }
+          .karte-table thead { display: none !important; }
+          .karte-table tr { display: block !important; border: 1px solid rgba(37, 99, 235, .18) !important; border-radius: 14px !important; margin-bottom: 8px !important; padding: 8px 10px !important; background: rgba(255,255,255,.94) !important; box-shadow: 0 8px 20px rgba(15,23,42,.06) !important; }
+          .karte-table tr.karte-pending { background: #fffbeb !important; }
+          .karte-table td { display: flex !important; gap: 8px !important; border: 0 !important; padding: 4px 0 !important; font-size: 13px !important; min-height: 0 !important; background: transparent !important; width: 100% !important; }
           .karte-table td::before { content: attr(data-label); flex: 0 0 78px; color: var(--muted); font-weight: 900; font-size: 11px; padding-top: 2px; }
-          .karte-table td.karte-empty { display: none; }
-          .karte-alias { margin-left: 0; width: 100%; }
-          .karte-alias input { max-width: none; flex: 1; }
-          .karte-diagram { min-width: 0; width: 100%; }
-          .karte-modal-grid, .karte-modal-grid.g3 { grid-template-columns: repeat(2, 1fr); }
-          .karte-modal-card { padding: 14px; }
-          .karte-modal-card input, .karte-modal-card select, .karte-modal-card textarea { font-size: 16px; } /* iOSの自動ズーム防止 */
-          #karteModal { padding: 10px; align-items: flex-start; }
+          .karte-table td.karte-empty { display: none !important; }
+          .karte-alias { margin-left: 0 !important; width: 100% !important; }
+          .karte-alias input { max-width: none !important; flex: 1 !important; }
+          .karte-diagram { min-width: 0 !important; width: 100% !important; white-space: normal !important; }
+          .karte-modal-grid, .karte-modal-grid.g3 { grid-template-columns: repeat(2, 1fr) !important; }
+          .karte-modal-card { padding: 14px !important; }
+          .karte-modal-card input, .karte-modal-card select, .karte-modal-card textarea { font-size: 16px !important; } /* iOSの自動ズーム防止 */
+          #karteModal { padding: 10px !important; align-items: flex-start !important; }
         }
         @media print { #kartePanel, #karteModal { display: none; } }
       `;
@@ -4744,7 +4743,7 @@
 
       function karteReady() { return typeof cloudReady !== "undefined" && cloudReady && db && currentUser; }
       function today() { return new Date().toISOString().slice(0, 10); }
-      function box(inner) { return `<div class="karte-box"><div class="section-label">保守カルテ</div>${inner}</div>`; }
+      function box(inner) { return `<div class="karte-box"><div class="section-label">保守カルテ <span style="opacity:.65;font-size:10px;font-weight:700">v4.1</span></div>${inner}</div>`; }
       function sel(id, options, value) {
         return `<select id="${id}">${options.map(o => `<option${o === value ? " selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
       }
