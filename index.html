@@ -4659,6 +4659,273 @@
     renderRecord();
     setupAuthEvents();
     initAuthGate();
+
+    /* ================================================================
+       保守カルテ統合モジュール（karte_customers）
+       - 既存の order_customer_records / 同期ロジックには一切書き込まない
+       - カルテは別コレクション karte_customers に保存（1ドキュメント=1顧客）
+       - 名寄せ: customerName 完全一致 → aliases（別名・表記ゆれ）配列で検索
+       ================================================================ */
+    (function () {
+      const KARTE_COLLECTION = "karte_customers";
+      const LOG_TYPES = ["設置", "保守", "障害", "問合せ", "その他"];
+      const LOG_STATUS = ["完了", "対応中", "保留"];
+      const K = { docId: null, doc: null, devices: [], logs: [], tab: "logs", loading: false, lastName: null, showPw: {} };
+
+      const style = document.createElement("style");
+      style.textContent = `
+        #kartePanel { margin-top: 18px; }
+        .karte-box { border-top: 2px dashed #c7d2e5; padding-top: 14px; }
+        .karte-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+        .karte-note { color: var(--muted); font-size: 12px; font-weight: 700; }
+        .karte-tab { background: #e7ebf1; color: #111827; min-height: 32px; padding: 6px 14px; border-radius: 10px; font-size: 12px; }
+        .karte-tab.on { background: var(--purple); color: #fff; }
+        .karte-pend { background: var(--amber-soft); color: var(--amber); border-radius: 999px; padding: 5px 11px; font-weight: 900; font-size: 12px; white-space: nowrap; }
+        .karte-alias { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--muted); }
+        .karte-alias input { max-width: 250px; min-height: 30px; height: 30px; font-size: 12px; }
+        .karte-table th { background: linear-gradient(135deg, #ddd6fe, #c4b5fd); color: #312e81; }
+        .karte-table input, .karte-table select { min-height: 28px; height: 28px; border: 1px solid transparent; border-radius: 8px; padding: 3px 6px; font-size: 12px; background: #fff; }
+        .karte-table input:hover, .karte-table select:hover { border-color: #cbd5e1; background: #f8fafc; }
+        .karte-table tr.karte-add td { background: #eff6ff; }
+        .karte-table tr.karte-pending td { background: #fffbeb; }
+        .karte-pw-wrap { display: flex; gap: 4px; align-items: center; }
+        .karte-pw-wrap input { flex: 1; min-width: 0; }
+        @media print { #kartePanel { display: none; } }
+      `;
+      document.head.appendChild(style);
+
+      const origRenderRecord = renderRecord;
+      renderRecord = function () { origRenderRecord(); mountPanel(); };
+
+      const bootTimer = setInterval(() => {
+        if (karteReady()) { clearInterval(bootTimer); K.lastName = null; mountPanel(); }
+      }, 1000);
+      mountPanel();
+
+      function karteReady() { return typeof cloudReady !== "undefined" && cloudReady && db && currentUser; }
+      function today() { return new Date().toISOString().slice(0, 10); }
+      function box(inner) { return `<div class="karte-box"><div class="section-label">保守カルテ</div>${inner}</div>`; }
+      function sel(id, options, value) {
+        return `<select id="${id}">${options.map(o => `<option${o === value ? " selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
+      }
+      function val(id) { const el = document.getElementById(id); return el ? el.value.trim() : ""; }
+
+      function mountPanel() {
+        const main = document.querySelector(".sheet-main");
+        if (!main) return;
+        let panel = document.getElementById("kartePanel");
+        if (!panel) { panel = document.createElement("section"); panel.id = "kartePanel"; main.appendChild(panel); }
+        const rec = currentRecord();
+        const name = rec && rec.fields ? (rec.fields.customerName || "") : "";
+        if (!karteReady()) { panel.innerHTML = box(`<div class="karte-note">ログイン・クラウド接続後に表示されます。</div>`); return; }
+        if (!name) { panel.innerHTML = box(`<div class="karte-note">屋号を入力するとカルテと連動します。</div>`); K.lastName = null; return; }
+        if (K.lastName !== name) { K.lastName = name; loadKarte(name, rec); } else { renderPanel(); }
+      }
+
+      async function loadKarte(name, rec) {
+        K.loading = true; K.docId = null; K.doc = null; K.devices = []; K.logs = [];
+        renderPanel();
+        try {
+          let snap = await db.collection(KARTE_COLLECTION).where("customerName", "==", name).limit(1).get();
+          if (snap.empty) snap = await db.collection(KARTE_COLLECTION).where("aliases", "array-contains", name).limit(1).get();
+          if (!snap.empty) {
+            const d = snap.docs[0];
+            K.docId = d.id; K.doc = d.data();
+            if (rec && rec.id && !(K.doc.orderRecordIds || []).includes(rec.id)) {
+              await d.ref.set({ orderRecordIds: firebase.firestore.FieldValue.arrayUnion(rec.id) }, { merge: true });
+            }
+            await loadSub();
+          }
+        } catch (e) { console.error("karte load error:", e); }
+        K.loading = false;
+        renderPanel();
+      }
+
+      async function loadSub() {
+        const ref = db.collection(KARTE_COLLECTION).doc(K.docId);
+        const [dv, lg] = await Promise.all([ref.collection("devices").get(), ref.collection("serviceLogs").get()]);
+        K.devices = dv.docs.map(d => ({ _id: d.id, ...d.data() }));
+        K.logs = lg.docs.map(d => ({ _id: d.id, ...d.data() }))
+          .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+      }
+
+      function renderPanel() {
+        const panel = document.getElementById("kartePanel");
+        if (!panel) return;
+        const rec = currentRecord();
+        const name = rec && rec.fields ? (rec.fields.customerName || "") : "";
+        if (K.loading) { panel.innerHTML = box(`<div class="karte-note">カルテ読込中…</div>`); return; }
+        if (!K.docId) {
+          panel.innerHTML = box(`
+            <div class="karte-note">「${esc(name)}」のカルテはまだありません。</div>
+            <div class="karte-row">
+              <button class="btn-primary btn-small" type="button" onclick="karteApi.create()">この屋号でカルテ作成</button>
+              <span class="karte-note">／ 表記ゆれの場合、既存カルテの屋号を入力して紐付け:</span>
+              <input id="karteLinkName" placeholder="既存カルテの屋号" style="max-width:220px">
+              <button class="btn-ghost btn-small" type="button" onclick="karteApi.link()">紐付け（別名登録）</button>
+            </div>`);
+          return;
+        }
+        const aliases = (K.doc.aliases || []).join(", ");
+        const pend = K.logs.filter(l => l.status === "対応中").length;
+        panel.innerHTML = box(`
+          <div class="karte-row">
+            <button class="karte-tab ${K.tab === "logs" ? "on" : ""}" type="button" onclick="karteApi.tab('logs')">対応履歴（${K.logs.length}）</button>
+            <button class="karte-tab ${K.tab === "devices" ? "on" : ""}" type="button" onclick="karteApi.tab('devices')">機器・認証情報（${K.devices.length}）</button>
+            ${pend ? `<span class="karte-pend">宿題 ${pend}件</span>` : ""}
+            <span class="karte-alias">別名（表記ゆれ）:
+              <input id="karteAliases" value="${esc(aliases)}" placeholder="例: （株）〇〇, 〇〇商店">
+              <button class="btn-ghost btn-small" type="button" onclick="karteApi.saveAliases()">保存</button>
+            </span>
+          </div>
+          ${K.tab === "logs" ? logsHtml() : devicesHtml()}
+        `);
+      }
+
+      function logsHtml() {
+        const head = `<thead><tr><th style="width:9%">日付</th><th style="width:7%">種別</th><th style="width:15%">症状/依頼</th><th style="width:13%">原因</th><th style="width:18%">対応内容</th><th style="width:8%">結果</th><th style="width:6%">担当</th><th style="width:13%">宿題・次回対応</th><th style="width:6%">状態</th><th style="width:9%">操作</th></tr></thead>`;
+        const add = `<tr class="karte-add">
+          <td><input id="nl-date" type="date" value="${today()}"></td>
+          <td>${sel("nl-type", LOG_TYPES, "保守")}</td>
+          <td><input id="nl-symptom"></td><td><input id="nl-cause"></td><td><input id="nl-action"></td>
+          <td><input id="nl-result"></td><td><input id="nl-staff"></td><td><input id="nl-followUp"></td>
+          <td>${sel("nl-status", LOG_STATUS, "完了")}</td>
+          <td class="center"><button class="btn-primary btn-small" type="button" onclick="karteApi.addLog()">＋追加</button></td>
+        </tr>`;
+        const rows = K.logs.map((l, i) => `<tr${l.status === "対応中" ? ` class="karte-pending"` : ""}>
+          <td><input id="l-date-${i}" type="date" value="${esc(l.date || "")}"></td>
+          <td>${sel(`l-type-${i}`, LOG_TYPES, l.type || "")}</td>
+          <td><input id="l-symptom-${i}" value="${esc(l.symptom || "")}"></td>
+          <td><input id="l-cause-${i}" value="${esc(l.cause || "")}"></td>
+          <td><input id="l-action-${i}" value="${esc(l.action || "")}"></td>
+          <td><input id="l-result-${i}" value="${esc(l.result || "")}"></td>
+          <td><input id="l-staff-${i}" value="${esc(l.staff || "")}"></td>
+          <td><input id="l-followUp-${i}" value="${esc(l.followUp || "")}"></td>
+          <td>${sel(`l-status-${i}`, LOG_STATUS, l.status || "完了")}</td>
+          <td class="center"><button class="btn-ghost btn-small" type="button" onclick="karteApi.saveLog(${i})">保存</button> <button class="btn-danger btn-small" type="button" onclick="karteApi.delLog(${i})">削除</button></td>
+        </tr>`).join("");
+        return `<table class="karte-table">${head}<tbody>${add}${rows}</tbody></table>`;
+      }
+
+      function devicesHtml() {
+        const head = `<thead><tr><th style="width:13%">機器名/項目</th><th style="width:11%">役割</th><th style="width:10%">固定IP</th><th style="width:11%">SSID</th><th style="width:9%">ID</th><th style="width:13%">PASS</th><th style="width:18%">備考</th><th style="width:8%">更新日時</th><th style="width:9%">操作</th></tr></thead>`;
+        const add = `<tr class="karte-add">
+          <td><input id="nd-name" placeholder="例: RTX-810"></td>
+          <td><input id="nd-role" placeholder="例: ルーター"></td>
+          <td><input id="nd-fixedIp"></td><td><input id="nd-ssid"></td><td><input id="nd-loginId"></td>
+          <td><input id="nd-password" type="password"></td><td><input id="nd-note"></td>
+          <td class="center karte-note">-</td>
+          <td class="center"><button class="btn-primary btn-small" type="button" onclick="karteApi.addDevice()">＋追加</button></td>
+        </tr>`;
+        const rows = K.devices.map((d, i) => `<tr>
+          <td><input id="d-name-${i}" value="${esc(d.name || "")}"></td>
+          <td><input id="d-role-${i}" value="${esc(d.role || "")}"></td>
+          <td><input id="d-fixedIp-${i}" value="${esc(d.fixedIp || "")}"></td>
+          <td><input id="d-ssid-${i}" value="${esc(d.ssid || "")}"></td>
+          <td><input id="d-loginId-${i}" value="${esc(d.loginId || "")}"></td>
+          <td><div class="karte-pw-wrap"><input id="d-password-${i}" type="${K.showPw[i] ? "text" : "password"}" value="${esc(d.password || "")}"><button class="btn-ghost btn-small" type="button" onclick="karteApi.togglePw(${i})">${K.showPw[i] ? "隠す" : "表示"}</button></div></td>
+          <td><input id="d-note-${i}" value="${esc(d.note || "")}"></td>
+          <td class="center karte-note">${esc(d.updatedAt || "")}</td>
+          <td class="center"><button class="btn-ghost btn-small" type="button" onclick="karteApi.saveDevice(${i})">保存</button> <button class="btn-danger btn-small" type="button" onclick="karteApi.delDevice(${i})">削除</button></td>
+        </tr>`).join("");
+        return `<table class="karte-table">${head}<tbody>${add}${rows}</tbody></table>`;
+      }
+
+      async function refresh() { await loadSub(); renderPanel(); }
+      function karteRef() { return db.collection(KARTE_COLLECTION).doc(K.docId); }
+
+      window.karteApi = {
+        tab(t) { K.tab = t; renderPanel(); },
+        togglePw(i) { K.showPw[i] = !K.showPw[i]; renderPanel(); },
+
+        async create() {
+          const rec = currentRecord();
+          const name = rec && rec.fields ? rec.fields.customerName : "";
+          if (!name) return;
+          try {
+            const ref = await db.collection(KARTE_COLLECTION).add({
+              customerName: name,
+              aliases: [],
+              orderRecordIds: rec.id ? [rec.id] : [],
+              address: rec.fields.address || "",
+              phone: rec.fields.headOfficePhone || "",
+              note: "",
+              createdAt: nowStamp()
+            });
+            K.docId = ref.id; K.doc = (await ref.get()).data();
+            await refresh();
+          } catch (e) { console.error(e); alert("カルテ作成に失敗しました: " + e.message); }
+        },
+
+        async link() {
+          const target = val("karteLinkName");
+          if (!target) return;
+          const rec = currentRecord();
+          const name = rec && rec.fields ? rec.fields.customerName : "";
+          try {
+            let snap = await db.collection(KARTE_COLLECTION).where("customerName", "==", target).limit(1).get();
+            if (snap.empty) snap = await db.collection(KARTE_COLLECTION).where("aliases", "array-contains", target).limit(1).get();
+            if (snap.empty) { alert(`「${target}」のカルテが見つかりません。`); return; }
+            await snap.docs[0].ref.set({
+              aliases: firebase.firestore.FieldValue.arrayUnion(name),
+              orderRecordIds: rec.id ? firebase.firestore.FieldValue.arrayUnion(rec.id) : firebase.firestore.FieldValue.arrayUnion()
+            }, { merge: true });
+            K.lastName = null; mountPanel();
+          } catch (e) { console.error(e); alert("紐付けに失敗しました: " + e.message); }
+        },
+
+        async saveAliases() {
+          const list = val("karteAliases").split(/[,、]/).map(s => s.trim()).filter(Boolean);
+          try {
+            await karteRef().set({ aliases: list }, { merge: true });
+            K.doc.aliases = list;
+            renderPanel();
+          } catch (e) { console.error(e); alert("保存に失敗しました: " + e.message); }
+        },
+
+        async addLog() {
+          const data = { date: val("nl-date"), type: val("nl-type"), symptom: val("nl-symptom"), cause: val("nl-cause"), action: val("nl-action"), result: val("nl-result"), staff: val("nl-staff"), followUp: val("nl-followUp"), status: val("nl-status"), createdAt: nowStamp() };
+          if (!data.symptom && !data.action) { alert("症状または対応内容を入力してください。"); return; }
+          try { await karteRef().collection("serviceLogs").add(data); await refresh(); }
+          catch (e) { console.error(e); alert("追加に失敗しました: " + e.message); }
+        },
+
+        async saveLog(i) {
+          const l = K.logs[i]; if (!l) return;
+          const data = {};
+          ["date", "type", "symptom", "cause", "action", "result", "staff", "followUp", "status"].forEach(f => { data[f] = val(`l-${f}-${i}`); });
+          try { await karteRef().collection("serviceLogs").doc(l._id).set(data, { merge: true }); await refresh(); }
+          catch (e) { console.error(e); alert("保存に失敗しました: " + e.message); }
+        },
+
+        async delLog(i) {
+          const l = K.logs[i]; if (!l || !confirm("この対応記録を削除しますか？")) return;
+          try { await karteRef().collection("serviceLogs").doc(l._id).delete(); await refresh(); }
+          catch (e) { console.error(e); alert("削除に失敗しました: " + e.message); }
+        },
+
+        async addDevice() {
+          const data = { name: val("nd-name"), role: val("nd-role"), fixedIp: val("nd-fixedIp"), ssid: val("nd-ssid"), loginId: val("nd-loginId"), password: val("nd-password"), note: val("nd-note"), updatedAt: nowStamp() };
+          if (!data.name) { alert("機器名を入力してください。"); return; }
+          try { await karteRef().collection("devices").add(data); await refresh(); }
+          catch (e) { console.error(e); alert("追加に失敗しました: " + e.message); }
+        },
+
+        async saveDevice(i) {
+          const d = K.devices[i]; if (!d) return;
+          const data = { updatedAt: nowStamp() };
+          ["name", "role", "fixedIp", "ssid", "loginId", "password", "note"].forEach(f => { data[f] = val(`d-${f}-${i}`); });
+          try { await karteRef().collection("devices").doc(d._id).set(data, { merge: true }); await refresh(); }
+          catch (e) { console.error(e); alert("保存に失敗しました: " + e.message); }
+        },
+
+        async delDevice(i) {
+          const d = K.devices[i]; if (!d || !confirm(`機器「${d.name || ""}」を削除しますか？`)) return;
+          try { await karteRef().collection("devices").doc(d._id).delete(); await refresh(); }
+          catch (e) { console.error(e); alert("削除に失敗しました: " + e.message); }
+        }
+      };
+    })();
   </script>
 </body>
 </html>
