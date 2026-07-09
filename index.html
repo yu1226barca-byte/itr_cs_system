@@ -4661,16 +4661,21 @@
     initAuthGate();
 
     /* ================================================================
-       保守カルテ統合モジュール（karte_customers）
+       保守カルテ統合モジュール v4（karte_customers）
        - 既存の order_customer_records / 同期ロジックには一切書き込まない
        - カルテは別コレクション karte_customers に保存（1ドキュメント=1顧客）
        - 名寄せ: customerName 完全一致 → aliases（別名・表記ゆれ）配列で検索
+       - v2: 対応履歴は一覧=要約表示、編集は詳細モーダル（長文対応）
+       - v3: 構成図・資料パス欄（NASパス保存・コピー / URLは開く）
+       - v4: モバイル対応（狭い画面ではカード表示）、機器編集もモーダル方式に統一
        ================================================================ */
     (function () {
       const KARTE_COLLECTION = "karte_customers";
+      // 構成図・資料の保管先（NAS）。カルテ新規作成時に「基点パス\屋号」を自動セット
+      const DIAGRAM_BASE = "\\\\192.168.1.8\\share\\public_新\\■営業本部（営業）\\■水口■\\顧客";
       const LOG_TYPES = ["設置", "保守", "障害", "問合せ", "その他"];
       const LOG_STATUS = ["完了", "対応中", "保留"];
-      const K = { docId: null, doc: null, devices: [], logs: [], tab: "logs", loading: false, lastName: null, showPw: {} };
+      const K = { docId: null, doc: null, devices: [], logs: [], tab: "logs", loading: false, lastName: null };
 
       const style = document.createElement("style");
       style.textContent = `
@@ -4684,13 +4689,48 @@
         .karte-alias { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--muted); }
         .karte-alias input { max-width: 250px; min-height: 30px; height: 30px; font-size: 12px; }
         .karte-table th { background: linear-gradient(135deg, #ddd6fe, #c4b5fd); color: #312e81; }
-        .karte-table input, .karte-table select { min-height: 28px; height: 28px; border: 1px solid transparent; border-radius: 8px; padding: 3px 6px; font-size: 12px; background: #fff; }
-        .karte-table input:hover, .karte-table select:hover { border-color: #cbd5e1; background: #f8fafc; }
-        .karte-table tr.karte-add td { background: #eff6ff; }
         .karte-table tr.karte-pending td { background: #fffbeb; }
+        .karte-table tr.karte-clickable { cursor: pointer; }
+        .karte-table tr.karte-clickable:hover td { background: #f0f9ff; }
+        .karte-table tr.karte-pending.karte-clickable:hover td { background: #fef3c7; }
+        .karte-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; word-break: break-word; font-size: 12px; line-height: 1.45; }
+        .karte-badge { display: inline-block; border-radius: 999px; padding: 3px 9px; font-size: 11px; font-weight: 900; white-space: nowrap; }
+        .karte-badge.b-done { background: var(--green-soft); color: var(--green); }
+        .karte-badge.b-pend { background: var(--amber-soft); color: var(--amber); }
+        .karte-badge.b-hold { background: #e5e7eb; color: #374151; }
+        .karte-diagram { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 320px; font-size: 12px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+        .karte-diagram input { flex: 1; min-width: 200px; min-height: 30px; height: 30px; font-size: 12px; }
         .karte-pw-wrap { display: flex; gap: 4px; align-items: center; }
         .karte-pw-wrap input { flex: 1; min-width: 0; }
-        @media print { #kartePanel { display: none; } }
+        #karteModal { position: fixed; inset: 0; background: rgba(15, 23, 42, .45); z-index: 300; display: flex; align-items: center; justify-content: center; padding: 20px; }
+        .karte-modal-card { background: #fff; border-radius: 18px; box-shadow: var(--shadow); width: min(760px, 94vw); max-height: 90vh; overflow: auto; padding: 18px 20px; }
+        .karte-modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .karte-modal-head strong { font-size: 15px; }
+        .karte-modal-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 10px; }
+        .karte-modal-grid.g3 { grid-template-columns: repeat(3, 1fr); }
+        .karte-field { margin-bottom: 10px; }
+        .karte-field label { display: block; font-size: 11px; font-weight: 900; color: var(--muted); margin-bottom: 3px; }
+        .karte-modal-card textarea { min-height: 66px; resize: vertical; font-size: 13px; line-height: 1.55; }
+        .karte-modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; flex-wrap: wrap; }
+        /* ---- モバイル: テーブル→カード表示 ---- */
+        @media (max-width: 760px) {
+          .karte-table, .karte-table tbody { display: block; width: 100%; }
+          .karte-table thead { display: none; }
+          .karte-table tr { display: block; border: 1px solid var(--line-dark); border-radius: 12px; margin-bottom: 8px; padding: 8px 10px; background: #fff; box-shadow: 0 4px 12px rgba(15,23,42,.05); }
+          .karte-table tr.karte-pending { background: #fffbeb; }
+          .karte-table tr.karte-pending td { background: transparent; }
+          .karte-table td { display: flex; gap: 8px; border: none; padding: 3px 0; font-size: 13px; min-height: 0; background: transparent; }
+          .karte-table td::before { content: attr(data-label); flex: 0 0 78px; color: var(--muted); font-weight: 900; font-size: 11px; padding-top: 2px; }
+          .karte-table td.karte-empty { display: none; }
+          .karte-alias { margin-left: 0; width: 100%; }
+          .karte-alias input { max-width: none; flex: 1; }
+          .karte-diagram { min-width: 0; width: 100%; }
+          .karte-modal-grid, .karte-modal-grid.g3 { grid-template-columns: repeat(2, 1fr); }
+          .karte-modal-card { padding: 14px; }
+          .karte-modal-card input, .karte-modal-card select, .karte-modal-card textarea { font-size: 16px; } /* iOSの自動ズーム防止 */
+          #karteModal { padding: 10px; align-items: flex-start; }
+        }
+        @media print { #kartePanel, #karteModal { display: none; } }
       `;
       document.head.appendChild(style);
 
@@ -4709,6 +4749,14 @@
         return `<select id="${id}">${options.map(o => `<option${o === value ? " selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
       }
       function val(id) { const el = document.getElementById(id); return el ? el.value.trim() : ""; }
+      function td(label, inner, cls) {
+        const empty = !inner ? " karte-empty" : "";
+        return `<td data-label="${esc(label)}" class="${cls || ""}${empty}">${inner}</td>`;
+      }
+      function statusBadge(s) {
+        const cls = s === "対応中" ? "b-pend" : (s === "保留" ? "b-hold" : "b-done");
+        return `<span class="karte-badge ${cls}">${esc(s || "完了")}</span>`;
+      }
 
       function mountPanel() {
         const main = document.querySelector(".sheet-main");
@@ -4768,6 +4816,10 @@
         }
         const aliases = (K.doc.aliases || []).join(", ");
         const pend = K.logs.filter(l => l.status === "対応中").length;
+        const dp = K.doc.diagramPath || "";
+        const diagBtn = /^https?:/.test(dp)
+          ? `<a class="btn-primary btn-small" style="display:inline-flex;align-items:center;text-decoration:none" href="${esc(dp)}" target="_blank" rel="noopener">開く</a>`
+          : `<button class="btn-primary btn-small" type="button" onclick="karteApi.copyDiagram()">パスをコピー</button>`;
         panel.innerHTML = box(`
           <div class="karte-row">
             <button class="karte-tab ${K.tab === "logs" ? "on" : ""}" type="button" onclick="karteApi.tab('logs')">対応履歴（${K.logs.length}）</button>
@@ -4778,57 +4830,122 @@
               <button class="btn-ghost btn-small" type="button" onclick="karteApi.saveAliases()">保存</button>
             </span>
           </div>
+          <div class="karte-row">
+            <span class="karte-diagram">構成図・資料:
+              <input id="karteDiagram" value="${esc(dp)}" placeholder="NASパス または URL">
+              <button class="btn-ghost btn-small" type="button" onclick="karteApi.saveDiagram()">保存</button>
+              ${diagBtn}
+            </span>
+          </div>
           ${K.tab === "logs" ? logsHtml() : devicesHtml()}
         `);
       }
 
+      /* ---- 対応履歴: 一覧は要約、編集はモーダル ---- */
       function logsHtml() {
-        const head = `<thead><tr><th style="width:9%">日付</th><th style="width:7%">種別</th><th style="width:15%">症状/依頼</th><th style="width:13%">原因</th><th style="width:18%">対応内容</th><th style="width:8%">結果</th><th style="width:6%">担当</th><th style="width:13%">宿題・次回対応</th><th style="width:6%">状態</th><th style="width:9%">操作</th></tr></thead>`;
-        const add = `<tr class="karte-add">
-          <td><input id="nl-date" type="date" value="${today()}"></td>
-          <td>${sel("nl-type", LOG_TYPES, "保守")}</td>
-          <td><input id="nl-symptom"></td><td><input id="nl-cause"></td><td><input id="nl-action"></td>
-          <td><input id="nl-result"></td><td><input id="nl-staff"></td><td><input id="nl-followUp"></td>
-          <td>${sel("nl-status", LOG_STATUS, "完了")}</td>
-          <td class="center"><button class="btn-primary btn-small" type="button" onclick="karteApi.addLog()">＋追加</button></td>
-        </tr>`;
-        const rows = K.logs.map((l, i) => `<tr${l.status === "対応中" ? ` class="karte-pending"` : ""}>
-          <td><input id="l-date-${i}" type="date" value="${esc(l.date || "")}"></td>
-          <td>${sel(`l-type-${i}`, LOG_TYPES, l.type || "")}</td>
-          <td><input id="l-symptom-${i}" value="${esc(l.symptom || "")}"></td>
-          <td><input id="l-cause-${i}" value="${esc(l.cause || "")}"></td>
-          <td><input id="l-action-${i}" value="${esc(l.action || "")}"></td>
-          <td><input id="l-result-${i}" value="${esc(l.result || "")}"></td>
-          <td><input id="l-staff-${i}" value="${esc(l.staff || "")}"></td>
-          <td><input id="l-followUp-${i}" value="${esc(l.followUp || "")}"></td>
-          <td>${sel(`l-status-${i}`, LOG_STATUS, l.status || "完了")}</td>
-          <td class="center"><button class="btn-ghost btn-small" type="button" onclick="karteApi.saveLog(${i})">保存</button> <button class="btn-danger btn-small" type="button" onclick="karteApi.delLog(${i})">削除</button></td>
+        const head = `<thead><tr><th style="width:9%">日付</th><th style="width:7%">種別</th><th style="width:26%">症状/依頼内容</th><th style="width:30%">対応内容</th><th style="width:7%">担当</th><th style="width:14%">宿題・次回対応</th><th style="width:7%">状態</th></tr></thead>`;
+        const rows = K.logs.map((l, i) => `<tr class="karte-clickable${l.status === "対応中" ? " karte-pending" : ""}" onclick="karteApi.openLog(${i})" title="タップで詳細・編集">
+          ${td("日付", esc(l.date || ""), "center")}
+          ${td("種別", esc(l.type || ""), "center")}
+          ${td("症状/依頼", `<div class="karte-clamp">${esc(l.symptom || "")}</div>`)}
+          ${td("対応内容", `<div class="karte-clamp">${esc(l.action || "")}</div>`)}
+          ${td("担当", esc(l.staff || ""), "center")}
+          ${td("宿題", `${l.followUp ? `<div class="karte-clamp">${esc(l.followUp)}</div>` : ""}`)}
+          ${td("状態", statusBadge(l.status), "center")}
         </tr>`).join("");
-        return `<table class="karte-table">${head}<tbody>${add}${rows}</tbody></table>`;
+        return `
+          <div class="karte-row">
+            <button class="btn-primary btn-small" type="button" onclick="karteApi.openLog(-1)">＋対応記録を追加</button>
+            <span class="karte-note">タップで全文表示・編集</span>
+          </div>
+          <table class="karte-table">${head}<tbody>${rows || `<tr><td colspan="7" class="center karte-note">対応記録はまだありません</td></tr>`}</tbody></table>`;
       }
 
+      function openLogModal(i) {
+        closeModal_();
+        const l = i >= 0 ? (K.logs[i] || {}) : { date: today(), type: "保守", status: "完了" };
+        const el = buildModal_(`<div class="karte-modal-card">
+          <div class="karte-modal-head">
+            <strong>${i >= 0 ? "対応記録の詳細・編集" : "対応記録の追加"}</strong>
+            <button class="btn-ghost btn-small" type="button" onclick="karteApi.closeModal()">✕ 閉じる</button>
+          </div>
+          <div class="karte-modal-grid">
+            <div class="karte-field"><label>日付</label><input id="kl-date" type="date" value="${esc(l.date || "")}"></div>
+            <div class="karte-field"><label>種別</label>${sel("kl-type", LOG_TYPES, l.type || "保守")}</div>
+            <div class="karte-field"><label>結果</label><input id="kl-result" value="${esc(l.result || "")}" placeholder="解決 / 暫定対応 等"></div>
+            <div class="karte-field"><label>担当</label><input id="kl-staff" value="${esc(l.staff || "")}"></div>
+            <div class="karte-field"><label>状態</label>${sel("kl-status", LOG_STATUS, l.status || "完了")}</div>
+          </div>
+          <div class="karte-field"><label>症状・依頼内容</label><textarea id="kl-symptom">${esc(l.symptom || "")}</textarea></div>
+          <div class="karte-field"><label>原因</label><textarea id="kl-cause">${esc(l.cause || "")}</textarea></div>
+          <div class="karte-field"><label>対応内容</label><textarea id="kl-action">${esc(l.action || "")}</textarea></div>
+          <div class="karte-field"><label>宿題・次回対応（誰が・何を・いつ）</label><textarea id="kl-followUp">${esc(l.followUp || "")}</textarea></div>
+          <div class="karte-modal-actions">
+            ${i >= 0 ? `<button class="btn-danger" type="button" onclick="karteApi.delLog(${i})">削除</button>` : ""}
+            <button class="btn-ghost" type="button" onclick="karteApi.closeModal()">キャンセル</button>
+            <button class="btn-primary" type="button" onclick="karteApi.saveLog(${i})">保存</button>
+          </div>
+        </div>`);
+        document.body.appendChild(el);
+      }
+
+      /* ---- 機器・認証情報: 一覧表示 + モーダル編集（モバイル対応） ---- */
       function devicesHtml() {
-        const head = `<thead><tr><th style="width:13%">機器名/項目</th><th style="width:11%">役割</th><th style="width:10%">固定IP</th><th style="width:11%">SSID</th><th style="width:9%">ID</th><th style="width:13%">PASS</th><th style="width:18%">備考</th><th style="width:8%">更新日時</th><th style="width:9%">操作</th></tr></thead>`;
-        const add = `<tr class="karte-add">
-          <td><input id="nd-name" placeholder="例: RTX-810"></td>
-          <td><input id="nd-role" placeholder="例: ルーター"></td>
-          <td><input id="nd-fixedIp"></td><td><input id="nd-ssid"></td><td><input id="nd-loginId"></td>
-          <td><input id="nd-password" type="password"></td><td><input id="nd-note"></td>
-          <td class="center karte-note">-</td>
-          <td class="center"><button class="btn-primary btn-small" type="button" onclick="karteApi.addDevice()">＋追加</button></td>
-        </tr>`;
-        const rows = K.devices.map((d, i) => `<tr>
-          <td><input id="d-name-${i}" value="${esc(d.name || "")}"></td>
-          <td><input id="d-role-${i}" value="${esc(d.role || "")}"></td>
-          <td><input id="d-fixedIp-${i}" value="${esc(d.fixedIp || "")}"></td>
-          <td><input id="d-ssid-${i}" value="${esc(d.ssid || "")}"></td>
-          <td><input id="d-loginId-${i}" value="${esc(d.loginId || "")}"></td>
-          <td><div class="karte-pw-wrap"><input id="d-password-${i}" type="${K.showPw[i] ? "text" : "password"}" value="${esc(d.password || "")}"><button class="btn-ghost btn-small" type="button" onclick="karteApi.togglePw(${i})">${K.showPw[i] ? "隠す" : "表示"}</button></div></td>
-          <td><input id="d-note-${i}" value="${esc(d.note || "")}"></td>
-          <td class="center karte-note">${esc(d.updatedAt || "")}</td>
-          <td class="center"><button class="btn-ghost btn-small" type="button" onclick="karteApi.saveDevice(${i})">保存</button> <button class="btn-danger btn-small" type="button" onclick="karteApi.delDevice(${i})">削除</button></td>
+        const head = `<thead><tr><th style="width:15%">機器名/項目</th><th style="width:12%">役割</th><th style="width:12%">固定IP</th><th style="width:13%">SSID</th><th style="width:11%">ID</th><th style="width:11%">PASS</th><th style="width:26%">備考</th></tr></thead>`;
+        const rows = K.devices.map((d, i) => `<tr class="karte-clickable" onclick="karteApi.openDevice(${i})" title="タップで詳細・編集">
+          ${td("機器", `<strong>${esc(d.name || "")}</strong>`)}
+          ${td("役割", esc(d.role || ""))}
+          ${td("固定IP", esc(d.fixedIp || ""))}
+          ${td("SSID", esc(d.ssid || ""))}
+          ${td("ID", esc(d.loginId || ""))}
+          ${td("PASS", d.password ? "●●●●" : "")}
+          ${td("備考", d.note ? `<div class="karte-clamp">${esc(d.note)}</div>` : "")}
         </tr>`).join("");
-        return `<table class="karte-table">${head}<tbody>${add}${rows}</tbody></table>`;
+        return `
+          <div class="karte-row">
+            <button class="btn-primary btn-small" type="button" onclick="karteApi.openDevice(-1)">＋機器を追加</button>
+            <span class="karte-note">タップで詳細・編集（PASSはモーダル内で表示）</span>
+          </div>
+          <table class="karte-table">${head}<tbody>${rows || `<tr><td colspan="7" class="center karte-note">機器情報はまだありません</td></tr>`}</tbody></table>`;
+      }
+
+      function openDeviceModal(i) {
+        closeModal_();
+        const d = i >= 0 ? (K.devices[i] || {}) : {};
+        const el = buildModal_(`<div class="karte-modal-card">
+          <div class="karte-modal-head">
+            <strong>${i >= 0 ? "機器情報の詳細・編集" : "機器の追加"}</strong>
+            <button class="btn-ghost btn-small" type="button" onclick="karteApi.closeModal()">✕ 閉じる</button>
+          </div>
+          <div class="karte-modal-grid g3">
+            <div class="karte-field"><label>機器名/項目</label><input id="kd-name" value="${esc(d.name || "")}" placeholder="例: RTX-810"></div>
+            <div class="karte-field"><label>役割</label><input id="kd-role" value="${esc(d.role || "")}" placeholder="例: ルーター / NVR / 無線AP"></div>
+            <div class="karte-field"><label>固定IP</label><input id="kd-fixedIp" value="${esc(d.fixedIp || "")}" placeholder="例: 192.168.1.1"></div>
+            <div class="karte-field"><label>SSID</label><input id="kd-ssid" value="${esc(d.ssid || "")}"></div>
+            <div class="karte-field"><label>ID</label><input id="kd-loginId" value="${esc(d.loginId || "")}"></div>
+            <div class="karte-field"><label>PASS</label><div class="karte-pw-wrap"><input id="kd-password" type="password" value="${esc(d.password || "")}"><button class="btn-ghost btn-small" type="button" onclick="karteApi.togglePw()">表示</button></div></div>
+          </div>
+          <div class="karte-field"><label>備考</label><textarea id="kd-note">${esc(d.note || "")}</textarea></div>
+          ${d.updatedAt ? `<div class="karte-note">最終更新: ${esc(d.updatedAt)}</div>` : ""}
+          <div class="karte-modal-actions">
+            ${i >= 0 ? `<button class="btn-danger" type="button" onclick="karteApi.delDevice(${i})">削除</button>` : ""}
+            <button class="btn-ghost" type="button" onclick="karteApi.closeModal()">キャンセル</button>
+            <button class="btn-primary" type="button" onclick="karteApi.saveDevice(${i})">保存</button>
+          </div>
+        </div>`);
+        document.body.appendChild(el);
+      }
+
+      function buildModal_(inner) {
+        const el = document.createElement("div");
+        el.id = "karteModal";
+        el.innerHTML = inner;
+        el.addEventListener("click", e => { if (e.target.id === "karteModal") closeModal_(); });
+        return el;
+      }
+      function closeModal_() {
+        const el = document.getElementById("karteModal");
+        if (el) el.remove();
       }
 
       async function refresh() { await loadSub(); renderPanel(); }
@@ -4836,7 +4953,13 @@
 
       window.karteApi = {
         tab(t) { K.tab = t; renderPanel(); },
-        togglePw(i) { K.showPw[i] = !K.showPw[i]; renderPanel(); },
+        openLog(i) { openLogModal(i); },
+        openDevice(i) { openDeviceModal(i); },
+        closeModal() { closeModal_(); },
+        togglePw() {
+          const el = document.getElementById("kd-password");
+          if (el) el.type = el.type === "password" ? "text" : "password";
+        },
 
         async create() {
           const rec = currentRecord();
@@ -4849,6 +4972,7 @@
               orderRecordIds: rec.id ? [rec.id] : [],
               address: rec.fields.address || "",
               phone: rec.fields.headOfficePhone || "",
+              diagramPath: DIAGRAM_BASE + "\\" + name,
               note: "",
               createdAt: nowStamp()
             });
@@ -4866,12 +4990,31 @@
             let snap = await db.collection(KARTE_COLLECTION).where("customerName", "==", target).limit(1).get();
             if (snap.empty) snap = await db.collection(KARTE_COLLECTION).where("aliases", "array-contains", target).limit(1).get();
             if (snap.empty) { alert(`「${target}」のカルテが見つかりません。`); return; }
-            await snap.docs[0].ref.set({
-              aliases: firebase.firestore.FieldValue.arrayUnion(name),
-              orderRecordIds: rec.id ? firebase.firestore.FieldValue.arrayUnion(rec.id) : firebase.firestore.FieldValue.arrayUnion()
-            }, { merge: true });
+            const upd = { aliases: firebase.firestore.FieldValue.arrayUnion(name) };
+            if (rec && rec.id) upd.orderRecordIds = firebase.firestore.FieldValue.arrayUnion(rec.id);
+            await snap.docs[0].ref.set(upd, { merge: true });
             K.lastName = null; mountPanel();
           } catch (e) { console.error(e); alert("紐付けに失敗しました: " + e.message); }
+        },
+
+        async saveDiagram() {
+          const path = val("karteDiagram");
+          try {
+            await karteRef().set({ diagramPath: path }, { merge: true });
+            K.doc.diagramPath = path;
+            renderPanel();
+          } catch (e) { console.error(e); alert("保存に失敗しました: " + e.message); }
+        },
+
+        async copyDiagram() {
+          const path = (K.doc && K.doc.diagramPath) || val("karteDiagram");
+          if (!path) { alert("パスが未入力です。"); return; }
+          try {
+            await navigator.clipboard.writeText(path);
+            alert("コピーしました。エクスプローラーのアドレスバーに貼り付けて開けます。\n" + path);
+          } catch (e) {
+            prompt("下記パスをコピーしてください:", path);
+          }
         },
 
         async saveAliases() {
@@ -4883,45 +5026,46 @@
           } catch (e) { console.error(e); alert("保存に失敗しました: " + e.message); }
         },
 
-        async addLog() {
-          const data = { date: val("nl-date"), type: val("nl-type"), symptom: val("nl-symptom"), cause: val("nl-cause"), action: val("nl-action"), result: val("nl-result"), staff: val("nl-staff"), followUp: val("nl-followUp"), status: val("nl-status"), createdAt: nowStamp() };
-          if (!data.symptom && !data.action) { alert("症状または対応内容を入力してください。"); return; }
-          try { await karteRef().collection("serviceLogs").add(data); await refresh(); }
-          catch (e) { console.error(e); alert("追加に失敗しました: " + e.message); }
-        },
-
         async saveLog(i) {
-          const l = K.logs[i]; if (!l) return;
           const data = {};
-          ["date", "type", "symptom", "cause", "action", "result", "staff", "followUp", "status"].forEach(f => { data[f] = val(`l-${f}-${i}`); });
-          try { await karteRef().collection("serviceLogs").doc(l._id).set(data, { merge: true }); await refresh(); }
-          catch (e) { console.error(e); alert("保存に失敗しました: " + e.message); }
+          ["date", "type", "symptom", "cause", "action", "result", "staff", "followUp", "status"].forEach(f => { data[f] = val(`kl-${f}`); });
+          if (!data.symptom && !data.action) { alert("症状または対応内容を入力してください。"); return; }
+          try {
+            if (i >= 0 && K.logs[i]) {
+              await karteRef().collection("serviceLogs").doc(K.logs[i]._id).set(data, { merge: true });
+            } else {
+              data.createdAt = nowStamp();
+              await karteRef().collection("serviceLogs").add(data);
+            }
+            closeModal_();
+            await refresh();
+          } catch (e) { console.error(e); alert("保存に失敗しました: " + e.message); }
         },
 
         async delLog(i) {
           const l = K.logs[i]; if (!l || !confirm("この対応記録を削除しますか？")) return;
-          try { await karteRef().collection("serviceLogs").doc(l._id).delete(); await refresh(); }
+          try { await karteRef().collection("serviceLogs").doc(l._id).delete(); closeModal_(); await refresh(); }
           catch (e) { console.error(e); alert("削除に失敗しました: " + e.message); }
         },
 
-        async addDevice() {
-          const data = { name: val("nd-name"), role: val("nd-role"), fixedIp: val("nd-fixedIp"), ssid: val("nd-ssid"), loginId: val("nd-loginId"), password: val("nd-password"), note: val("nd-note"), updatedAt: nowStamp() };
-          if (!data.name) { alert("機器名を入力してください。"); return; }
-          try { await karteRef().collection("devices").add(data); await refresh(); }
-          catch (e) { console.error(e); alert("追加に失敗しました: " + e.message); }
-        },
-
         async saveDevice(i) {
-          const d = K.devices[i]; if (!d) return;
           const data = { updatedAt: nowStamp() };
-          ["name", "role", "fixedIp", "ssid", "loginId", "password", "note"].forEach(f => { data[f] = val(`d-${f}-${i}`); });
-          try { await karteRef().collection("devices").doc(d._id).set(data, { merge: true }); await refresh(); }
-          catch (e) { console.error(e); alert("保存に失敗しました: " + e.message); }
+          ["name", "role", "fixedIp", "ssid", "loginId", "password", "note"].forEach(f => { data[f] = val(`kd-${f}`); });
+          if (!data.name) { alert("機器名を入力してください。"); return; }
+          try {
+            if (i >= 0 && K.devices[i]) {
+              await karteRef().collection("devices").doc(K.devices[i]._id).set(data, { merge: true });
+            } else {
+              await karteRef().collection("devices").add(data);
+            }
+            closeModal_();
+            await refresh();
+          } catch (e) { console.error(e); alert("保存に失敗しました: " + e.message); }
         },
 
         async delDevice(i) {
           const d = K.devices[i]; if (!d || !confirm(`機器「${d.name || ""}」を削除しますか？`)) return;
-          try { await karteRef().collection("devices").doc(d._id).delete(); await refresh(); }
+          try { await karteRef().collection("devices").doc(d._id).delete(); closeModal_(); await refresh(); }
           catch (e) { console.error(e); alert("削除に失敗しました: " + e.message); }
         }
       };
