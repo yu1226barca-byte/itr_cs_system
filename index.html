@@ -4667,7 +4667,7 @@
        - 名寄せ: customerName 完全一致 → aliases（別名・表記ゆれ）配列で検索
        - v2: 対応履歴は一覧=要約表示、編集は詳細モーダル（長文対応）
        - v3: 構成図・資料パス欄（NASパス保存・コピー / URLは開く）
-       - v4.1: モバイル対応（狭い画面ではカード表示・!important強制適用）、機器編集もモーダル方式に統一
+       - v4.2: モバイル対応・スマホUI拡大（狭い画面ではカード表示・!important強制適用）、機器編集もモーダル方式に統一
        ================================================================ */
     (function () {
       const KARTE_COLLECTION = "karte_customers";
@@ -4728,6 +4728,17 @@
           .karte-modal-card { padding: 14px !important; }
           .karte-modal-card input, .karte-modal-card select, .karte-modal-card textarea { font-size: 16px !important; } /* iOSの自動ズーム防止 */
           #karteModal { padding: 10px !important; align-items: flex-start !important; }
+          /* v4.2: スマホでの欄・ボタン拡大 */
+          #kartePanel .karte-tab { flex: 1 1 40% !important; min-height: 42px !important; font-size: 14px !important; }
+          #kartePanel .karte-row .btn-small, #kartePanel .karte-row .btn-primary, #kartePanel .karte-row .btn-ghost { min-height: 40px !important; font-size: 13px !important; padding: 8px 12px !important; }
+          .karte-alias, .karte-diagram { font-size: 13px !important; }
+          .karte-alias input, .karte-diagram input, #karteLinkName { min-height: 42px !important; height: auto !important; font-size: 16px !important; }
+          .karte-note { font-size: 12px !important; }
+          .karte-clamp { font-size: 13px !important; }
+          .karte-table td::before { flex: 0 0 84px !important; font-size: 12px !important; }
+          .karte-modal-actions button { min-height: 44px !important; flex: 1 1 auto !important; font-size: 14px !important; }
+          /* v4.2: 台帳側修正 - 仕切り合計などの数値セルが縦に折り返される問題 */
+          .items-table .item-total, .purchase-table .readonly-cell, .total-value { white-space: nowrap !important; word-break: keep-all !important; overflow: hidden !important; text-overflow: ellipsis !important; }
         }
         @media print { #kartePanel, #karteModal { display: none; } }
       `;
@@ -4743,7 +4754,7 @@
 
       function karteReady() { return typeof cloudReady !== "undefined" && cloudReady && db && currentUser; }
       function today() { return new Date().toISOString().slice(0, 10); }
-      function box(inner) { return `<div class="karte-box"><div class="section-label">保守カルテ <span style="opacity:.65;font-size:10px;font-weight:700">v4.1</span></div>${inner}</div>`; }
+      function box(inner) { return `<div class="karte-box"><div class="section-label">保守カルテ <span style="opacity:.65;font-size:10px;font-weight:700">v4.2</span></div>${inner}</div>`; }
       function sel(id, options, value) {
         return `<select id="${id}">${options.map(o => `<option${o === value ? " selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
       }
