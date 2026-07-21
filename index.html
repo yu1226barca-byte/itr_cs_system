@@ -3627,7 +3627,7 @@
     let currentIndex = 0;
     let activeNote = { index: null };
 
-    const dateFields = new Set(["applicationDate", "inspectionDate", "constructionDate", "contractorBirth", "applicantBirth"]);
+    const dateFields = new Set(["applicationDate", "inspectionDate", "constructionDate", "contractorBirth", "applicantBirth", "paymentDate"]);
 
     const fieldRows = [
       [["商流", "route", "select", OPTIONS.routes], ["申込日", "applicationDate", "date"], ["検収日", "inspectionDate", "date"]],
@@ -3636,7 +3636,7 @@
       [["契約者名", "contractorName", "text"], ["連絡先", "contractorPhone", "text"], ["生年月日", "contractorBirth", "date"]],
       [["申込者名", "applicantName", "text"], ["連絡先", "applicantPhone", "text"], ["生年月日", "applicantBirth", "date"]],
       [["申込プラン", "plan", "text"], ["メアド", "email", "text"], ["", "", "blank"]],
-      [["割引", "discount", "text"], ["進捗ステータス", "progressStatus", "select", OPTIONS.progress], ["", "", "blank"]]
+      [["割引", "discount", "text"], ["進捗ステータス", "progressStatus", "select", OPTIONS.progress], ["入金予定日", "paymentDate", "date"]]
     ];
 
     const itemFields = [
