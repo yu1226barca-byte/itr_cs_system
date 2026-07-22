@@ -3418,11 +3418,13 @@
     let localEditUntil = 0;
     let pendingRemotePayload = null;
     let pendingRemoteTimer = null;
-    const REMOTE_APPLY_DELAY_MS = 3000;
+    const REMOTE_APPLY_DELAY_MS = 1500; // 3000から短縮してレスポンス向上
     let auth = null;
     let currentUser = null;
     let authStarted = false;
     let cloudStarted = false;
+    let cloudSyncSigs = new Map();       // レコードごとの前回同期時ハッシュ（変更検知用）
+    let cloudSyncSnapshots = new Map();  // レコードごとの前回同期時の実データ（フィールド差分算出用）
 
     function firebaseConfigured() {
       return Boolean(
@@ -3450,6 +3452,15 @@
       localEditUntil = Date.now() + REMOTE_APPLY_DELAY_MS;
     }
 
+    // レコードごとの変更を検知するためのハッシュ関数（更新日時系は除外）
+    function getRecordSig(record, index) {
+      return JSON.stringify(record || {}, (key, val) => {
+        if (["updatedAt", "updatedAtClient", "updatedAtServer"].includes(key)) return undefined;
+        if (val && typeof val.toDate === "function") return undefined;
+        return val;
+      }) + "_" + index;
+    }
+
     function isEditingNow() {
       const active = document.activeElement;
       const activeIsInput = active && ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName);
@@ -3475,6 +3486,14 @@
       records = remoteRecords;
       cloudKnownIds = ids;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+
+      // クラウドから受信した最新状態を差分基準として記録
+      cloudSyncSigs.clear();
+      cloudSyncSnapshots.clear();
+      records.forEach((record, index) => {
+        cloudSyncSigs.set(record.id, getRecordSig(record, index));
+        cloudSyncSnapshots.set(record.id, deepCopy(record));
+      });
 
       const nextIndex = selectedId ? records.findIndex(r => r.id === selectedId) : currentIndex;
       currentIndex = Math.max(0, nextIndex >= 0 ? nextIndex : Math.min(currentIndex, records.length - 1));
@@ -3841,6 +3860,12 @@
       cloudSaveTimer = setTimeout(saveAllRecordsToCloud, 700);
     }
 
+    // 新しいレコードID（端末間の同時作成でも衝突しないようUUIDを優先）
+    function newRecordId(index) {
+      if (typeof crypto !== "undefined" && crypto.randomUUID) return "rec_" + crypto.randomUUID();
+      return `rec_${Date.now()}_${index}_${Math.floor(Math.random() * 1e6)}`;
+    }
+
     async function saveAllRecordsToCloud() {
       if (!cloudReady || !db || applyingRemote) return;
 
@@ -3849,29 +3874,69 @@
 
         const batch = db.batch();
         const currentIds = new Set();
+        let writeCount = 0;
 
         records.forEach((record, index) => {
-          record.id = record.id || `rec_${Date.now()}_${index}`;
-          record.sortIndex = index;
-          record.updatedAt = new Date().toISOString();
+          record.id = record.id || newRecordId(index);
           currentIds.add(record.id);
 
+          const sig = getRecordSig(record, index);
+          // 変更のないレコードは送信しない（差分同期）
+          if (cloudSyncSigs.get(record.id) === sig) return;
+
+          record.sortIndex = index;
+          record.updatedAt = new Date().toISOString();
           const ref = db.collection(FIRESTORE_COLLECTION).doc(record.id);
-          batch.set(ref, {
-            ...record,
-            sortIndex: index,
-            updatedAtClient: record.updatedAt,
-            updatedAtServer: firebase.firestore.FieldValue.serverTimestamp()
-          });
+          const prev = cloudSyncSnapshots.get(record.id);
+
+          if (!prev) {
+            // クラウド未登録（新規）→ ドキュメント全体を書き込み
+            batch.set(ref, {
+              ...record,
+              sortIndex: index,
+              updatedAtClient: record.updatedAt,
+              updatedAtServer: firebase.firestore.FieldValue.serverTimestamp()
+            });
+          } else {
+            // 既存 → 変更されたフィールドだけ update（他人が編集した別フィールドを潰さない）
+            const patch = {
+              sortIndex: index,
+              updatedAtClient: record.updatedAt,
+              updatedAtServer: firebase.firestore.FieldValue.serverTimestamp()
+            };
+            if (record.sheetName !== prev.sheetName) patch.sheetName = record.sheetName;
+            const curFields = record.fields || {};
+            const prevFields = prev.fields || {};
+            // fields.* を dot-path で個別更新（変わった項目のみ）
+            Object.keys(curFields).forEach(k => {
+              if (curFields[k] !== prevFields[k]) patch["fields." + k] = curFields[k];
+            });
+            // items / purchase は構造が複雑なため、変化があれば丸ごと差し替え
+            if (JSON.stringify(record.items || []) !== JSON.stringify(prev.items || [])) patch.items = record.items || [];
+            if (JSON.stringify(record.purchase || {}) !== JSON.stringify(prev.purchase || {})) patch.purchase = record.purchase || {};
+            batch.update(ref, patch);
+          }
+
+          cloudSyncSigs.set(record.id, sig);
+          cloudSyncSnapshots.set(record.id, deepCopy(record));
+          writeCount++;
         });
 
+        // 削除されたレコード
         cloudKnownIds.forEach(id => {
           if (!currentIds.has(id)) {
             batch.delete(db.collection(FIRESTORE_COLLECTION).doc(id));
+            cloudSyncSigs.delete(id);
+            cloudSyncSnapshots.delete(id);
+            writeCount++;
           }
         });
 
-        await batch.commit();
+        // 変更があった場合のみ通信
+        if (writeCount > 0) {
+          await batch.commit();
+        }
+
         cloudKnownIds = currentIds;
         lastRenderedSignature = stableRecordsSignature(records);
         localEditUntil = Date.now() + 1200;
@@ -3884,6 +3949,8 @@
 
     async function seedCloudIfEmpty() {
       if (!cloudReady || !db || !records.length) return;
+      cloudSyncSigs.clear();       // 強制的に全件アップロードするためクリア
+      cloudSyncSnapshots.clear();
       await saveAllRecordsToCloud();
     }
 
@@ -4264,7 +4331,19 @@
       const select = document.getElementById("recordSelect");
       select.innerHTML = filteredIndexes.map(index => {
         const r = records[index];
-        const label = `${r.fields.customerName || r.sheetName}｜${r.fields.progressStatus || "未設定"}`;
+
+        // リマインダー期限の判定
+        let alertMark = "";
+        if (r.fields.reminderDate) {
+          const todayStr = new Date().toISOString().slice(0, 10);
+          if (r.fields.reminderDate <= todayStr) {
+            alertMark = " 🔔(期限!)"; // 今日または過去ならベルマーク
+          } else {
+            alertMark = " 📅"; // 未来の日付ならカレンダーマーク
+          }
+        }
+
+        const label = `${r.fields.customerName || r.sheetName}｜${r.fields.progressStatus || "未設定"}${alertMark}`;
         return `<option value="${index}" ${index === currentIndex ? "selected" : ""}>${esc(label)}</option>`;
       }).join("") || `<option>該当なし</option>`;
     }
@@ -4843,11 +4922,11 @@
     });
 
     document.getElementById("csvBtn").addEventListener("click", () => {
-      const headers = ["屋号","商流","申込日","検収日","工事予定日","契約書受渡（発送）日","進捗ステータス","リース会社","購入方法","月額税別","料率","回数","月額/料率%","仕切り合計","粗利","明細種別","商材","メーカー/外注先","仕入れ先","型番","個数","仕切り単価","納期予定日","納品状況","備考"];
+      const headers = ["屋号","商流","申込日","検収日","工事予定日","書類受渡日","進捗ステータス","リース会社","購入方法","月額税別","料率","回数","月額/料率%","仕切り合計","粗利","リマインダー日","リマインダー内容","明細種別","商材","メーカー/外注先","仕入れ先","型番","個数","仕切り単価","納期予定日","納品状況","備考"];
       const rows = [];
       records.forEach(record => {
         (record.items || [blankItem()]).forEach(item => {
-          rows.push([record.fields.customerName, record.fields.route, record.fields.applicationDate, record.fields.inspectionDate, record.fields.constructionDate, record.fields.documentHandoverDate, record.fields.progressStatus, record.fields.leaseCompany, record.purchase.method, record.purchase.monthly, record.purchase.rate, record.purchase.times, calcBaseAmount(record), calcItemTotal(record), calcGross(record), item.type, item.product, item.maker, item.supplier, item.model, item.qty, item.unitCost, item.deliveryDate, item.deliveryStatus, item.remark]);
+          rows.push([record.fields.customerName, record.fields.route, record.fields.applicationDate, record.fields.inspectionDate, record.fields.constructionDate, record.fields.documentHandoverDate, record.fields.progressStatus, record.fields.leaseCompany, record.purchase.method, record.purchase.monthly, record.purchase.rate, record.purchase.times, calcBaseAmount(record), calcItemTotal(record), calcGross(record), record.fields.reminderDate, record.fields.reminderText, item.type, item.product, item.maker, item.supplier, item.model, item.qty, item.unitCost, item.deliveryDate, item.deliveryStatus, item.remark]);
         });
       });
       const csv = [headers, ...rows].map(row => row.map(cell => `"${String(cell ?? "").replaceAll('"', '""')}"`).join(",")).join("\n");
