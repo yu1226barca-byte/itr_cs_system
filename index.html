@@ -3233,6 +3233,28 @@
       }
     }
 
+    /* ★検索モーダル(レコードと同じ全欄フォーム型) */
+    #searchModal .modal-card { width: min(880px, 96vw); }
+    #searchModal .modal-body { padding: 0; max-height: 82vh; overflow-y: auto; }
+    .search-form { padding: 14px 18px 4px; }
+    .sf-section { font-size: 12px; font-weight: 700; color: #1e3a8a; margin: 12px 0 6px; }
+    .sf-section:first-child { margin-top: 2px; }
+    .sf-grid { display: grid; grid-template-columns: max-content 1fr max-content 1fr; gap: 6px 10px; align-items: center; }
+    .sf-label { font-size: 12px; color: #475569; font-weight: 600; text-align: right; }
+    .sf-input { width: 100%; padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 13px; box-sizing: border-box; background: #fff; }
+    .sf-input:focus { outline: none; border-color: #1e3a8a; }
+    .search-form-actions { position: sticky; bottom: 0; background: #fff; padding: 10px 18px; display: flex; justify-content: space-between; align-items: center; gap: 10px; border-top: 1px solid #eef2f7; z-index: 1; }
+    .search-hint { font-size: 12px; color: #64748b; }
+    .search-results { padding: 4px 12px 14px; }
+    .search-hit { border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px 12px; margin: 6px 0; cursor: pointer; transition: background .15s, border-color .15s; }
+    .search-hit:hover { background: #f1f5f9; border-color: #1e3a8a; }
+    .search-hit-title { font-weight: 700; font-size: 14px; color: #0f172a; display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+    .search-hit-status { font-size: 11px; font-weight: 600; color: #1e3a8a; background: #dbeafe; border-radius: 9999px; padding: 2px 10px; white-space: nowrap; }
+    .search-hit-fields { margin-top: 6px; font-size: 12px; color: #475569; line-height: 1.7; }
+    .search-hit-fields span { display: inline-block; margin-right: 12px; }
+    .search-empty { padding: 20px 18px; text-align: center; color: #94a3b8; font-size: 13px; }
+    @media (max-width: 640px) { .sf-grid { grid-template-columns: max-content 1fr; } }
+
   </style>
 </head>
 <body class="auth-locked">
@@ -3298,7 +3320,8 @@
     </section>
 
     <div class="control-panel">
-      <input id="recordSearch" type="search" placeholder="屋号・商流・ステータス検索" />
+      <button class="btn-ghost" id="openSearchBtn" type="button">🔍 検索</button>
+      <input id="recordSearch" type="search" placeholder="全項目をキーワード検索" />
       <select id="recordSelect"></select>
       <select id="statusQuickFilter">
         <option value="">全ステータス</option>
@@ -3333,6 +3356,26 @@
       <div class="modal-actions">
         <button class="btn-ghost" id="noteTimestampBtn" type="button">日時を挿入</button>
         <button class="btn-primary" id="noteSaveBtn" type="button">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="searchModal" role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <div class="modal-head">
+        <strong>全項目検索</strong>
+        <button class="btn-ghost btn-small" id="searchCloseBtn" type="button">閉じる</button>
+      </div>
+      <div class="modal-body">
+        <div class="search-form" id="searchForm"></div>
+        <div class="search-form-actions">
+          <span class="search-hint" id="searchHint"></span>
+          <span>
+            <button class="btn-ghost btn-small" id="searchClearBtn" type="button">クリア</button>
+            <button class="btn-primary btn-small" id="searchRunBtn" type="button">この条件で検索</button>
+          </span>
+        </div>
+        <div class="search-results" id="searchResults"></div>
       </div>
     </div>
   </div>
@@ -3584,7 +3627,7 @@
     let currentIndex = 0;
     let activeNote = { index: null };
 
-    const dateFields = new Set(["applicationDate", "inspectionDate", "constructionDate", "contractorBirth", "applicantBirth"]);
+     const dateFields = new Set(["applicationDate", "inspectionDate", "constructionDate", "contractorBirth", "applicantBirth", "paymentDate", "documentHandoverDate", "reminderDate"]);
 
     const fieldRows = [
       [["商流", "route", "select", OPTIONS.routes], ["申込日", "applicationDate", "date"], ["検収日", "inspectionDate", "date"]],
@@ -3592,8 +3635,9 @@
       [["住所", "address", "text"], ["本社番号", "headOfficePhone", "text"], ["失注日", "lostDate", "text"]],
       [["契約者名", "contractorName", "text"], ["連絡先", "contractorPhone", "text"], ["生年月日", "contractorBirth", "date"]],
       [["申込者名", "applicantName", "text"], ["連絡先", "applicantPhone", "text"], ["生年月日", "applicantBirth", "date"]],
-      [["申込プラン", "plan", "text"], ["メアド", "email", "text"], ["", "", "blank"]],
-      [["割引", "discount", "text"], ["進捗ステータス", "progressStatus", "select", OPTIONS.progress], ["", "", "blank"]]
+      [["申込プラン", "plan", "text"], ["メアド", "email", "text"], ["契約書受渡（発送）日", "documentHandoverDate", "date"]],
+      [["割引", "discount", "text"], ["進捗ステータス", "progressStatus", "select", OPTIONS.progress], ["入金予定日", "paymentDate", "date"]],
+      [["リマインダー日", "reminderDate", "date"], ["リマイン内容", "reminderText", "text"], ["", "", "blank"]]
     ];
 
     const itemFields = [
@@ -3647,6 +3691,8 @@
         record.fields.constructionDate = normalizeDate(record.fields.constructionDate);
         record.fields.contractorBirth = normalizeDate(record.fields.contractorBirth);
         record.fields.applicantBirth = normalizeDate(record.fields.applicantBirth);
+        record.fields.documentHandoverDate = normalizeDate(record.fields.documentHandoverDate); // この1行を追加
+        record.fields.reminderDate = normalizeDate(record.fields.reminderDate);
         record.items = (record.items || [blankItem()]).map(item => {
           item.type = normalizeType(item.type);
           item.deliveryDate = normalizeDate(item.deliveryDate);
@@ -3972,6 +4018,9 @@
           applicantBirth: "",
           plan: "",
           email: "",
+          documentHandoverDate: "",
+          reminderDate: "",
+          reminderText: "",
           discount: "無",
           progressStatus: "与信待ち"
         },
@@ -4205,7 +4254,8 @@
       const status = document.getElementById("statusQuickFilter").value;
       filteredIndexes = records.map((record, index) => ({ record, index })).filter(entry => {
         const r = entry.record;
-        const target = [r.sheetName, r.fields.customerName, r.fields.route, r.fields.progressStatus, r.fields.address, r.fields.contractorName].join(" ").toLowerCase();
+        const itemValues = (r.items || []).reduce((acc, item) => acc.concat(Object.values(item)), []);
+        const target = [r.sheetName].concat(Object.values(r.fields || {})).concat(itemValues).join(" ").toLowerCase();
         const keywordOk = !keyword || target.includes(keyword);
         const statusOk = !status || r.fields.progressStatus === status;
         return keywordOk && statusOk;
@@ -4476,6 +4526,154 @@
       textarea.selectionStart = textarea.selectionEnd = start + prefix.length;
     }
 
+/* ★検索モーダル(レコードと同じ全欄フォーム型) */
+    const searchFormFields = fieldRows.reduce((arr, row) => {
+      row.forEach(def => { if (def[1]) arr.push(def); });
+      return arr;
+    }, []);
+    
+    // 【変更点1】 明細の検索対象に「納期予定日」を追加しました
+    const searchFormItemFields = [
+      ["種別", "type", "select", OPTIONS.types],
+      ["商材", "product", "text"],
+      ["メーカー/外注先", "maker", "text"],
+      ["仕入れ先", "supplier", "text"],
+      ["型番", "model", "text"],
+      ["納期予定日", "deliveryDate", "date"],
+      ["納品状況", "deliveryStatus", "select", OPTIONS.deliveryStatuses],
+      ["備考", "remark", "text"]
+    ];
+
+    // 【変更点2】 日付（kind === "date"）の場合、開始・終了の2つのカレンダーUIを並べるように変更しました
+    function searchCellHtml(def, attr) {
+      const label = def[0], field = def[1], kind = def[2], options = def[3];
+      let input;
+      if (kind === "select") {
+        input = `<select class="sf-input" ${attr}="${field}"><option value="">（指定なし）</option>${(options || []).map(o => `<option value="${esc(o)}">${esc(o)}</option>`).join("")}</select>`;
+      } else if (kind === "date") {
+        input = `<div style="display: flex; gap: 6px; align-items: center; width: 100%;">
+          <input type="date" class="sf-input" ${attr}="${field}" data-date-type="start" style="flex: 1; min-width: 0; padding: 4px 6px; font-size: 12px;" />
+          <span style="font-size: 11px; color: #64748b; white-space: nowrap;">〜</span>
+          <input type="date" class="sf-input" ${attr}="${field}" data-date-type="end" style="flex: 1; min-width: 0; padding: 4px 6px; font-size: 12px;" />
+        </div>`;
+      } else {
+        input = `<input type="text" class="sf-input" ${attr}="${field}" placeholder="部分一致" autocomplete="off" />`;
+      }
+      return `<div class="sf-label">${esc(label)}</div><div>${input}</div>`;
+    }
+
+    function buildSearchForm() {
+      document.getElementById("searchForm").innerHTML =
+        `<div class="sf-section">顧客・案件情報</div>` +
+        `<div class="sf-grid">${searchFormFields.map(def => searchCellHtml(def, "data-search-field")).join("")}</div>` +
+        `<div class="sf-section">明細（いずれかの明細行が条件を満たす顧客を検索）</div>` +
+        `<div class="sf-grid">${searchFormItemFields.map(def => searchCellHtml(def, "data-search-item")).join("")}</div>`;
+    }
+
+    // 【変更点3】 inputの種別(type)や、開始/終了の属性(dateType)を読み取るように拡張しました
+    function collectSearchCriteria() {
+      const read = sel => Array.from(document.querySelectorAll(sel)).map(el => ({
+        field: el.dataset.searchField || el.dataset.searchItem,
+        value: el.value.trim(),
+        isSelect: el.tagName === "SELECT",
+        type: el.type,
+        dateType: el.dataset.dateType
+      })).filter(c => c.value);
+      return { fieldC: read("#searchForm [data-search-field]"), itemC: read("#searchForm [data-search-item]") };
+    }
+
+    // 【変更点4】 日付検索の場合の以上(>=)・以下(<=)の判定ロジックを追加しました
+    function matchCriteria(raw, crit) {
+      if (raw == null) return false;
+      
+      if (crit.type === "date") {
+        const targetDate = String(raw).trim();
+        // 対象データの日付が空欄または未設定の場合はヒットさせない
+        if (!targetDate || targetDate === "-" || targetDate === "未") return false;
+        
+        const normalizedTarget = normalizeDate(targetDate);
+        if (!normalizedTarget) return false;
+
+        if (crit.dateType === "start") {
+          return normalizedTarget >= crit.value;
+        } else if (crit.dateType === "end") {
+          return normalizedTarget <= crit.value;
+        }
+      }
+      
+      if (crit.isSelect) return String(raw) === crit.value;
+      return String(raw).toLowerCase().includes(crit.value.toLowerCase());
+    }
+
+    function runFormSearch() {
+      const { fieldC, itemC } = collectSearchCriteria();
+      if (!fieldC.length && !itemC.length) return { results: [], empty: true };
+      const results = [];
+      records.forEach((record, index) => {
+        const fieldsOk = fieldC.every(c => matchCriteria(record.fields ? record.fields[c.field] : null, c));
+        if (!fieldsOk) return;
+        const itemsOk = !itemC.length || (record.items || []).some(item => itemC.every(c => matchCriteria(item[c.field], c)));
+        if (!itemsOk) return;
+        results.push({ index, record });
+      });
+      return { results, empty: false };
+    }
+
+    function renderFormResults() {
+      const { results, empty } = runFormSearch();
+      const box = document.getElementById("searchResults");
+      const hint = document.getElementById("searchHint");
+      if (empty) {
+        hint.textContent = "検索したい欄に語句を入れてください。複数欄はAND（すべて一致）で絞り込みます。";
+        box.innerHTML = "";
+        return;
+      }
+      hint.textContent = `${results.length}件ヒット`;
+      if (!results.length) {
+        box.innerHTML = `<div class="search-empty">該当する顧客が見つかりませんでした。</div>`;
+        return;
+      }
+      const MAX = 100;
+      box.innerHTML = results.slice(0, MAX).map(r => {
+        const name = r.record.fields.customerName || r.record.sheetName || "(無名)";
+        const status = r.record.fields.progressStatus || "未設定";
+        const summ = [["住所", r.record.fields.address], ["電話", r.record.fields.headOfficePhone], ["契約者", r.record.fields.contractorName]]
+          .filter(pair => pair[1]).map(pair => `<span><b>${pair[0]}:</b> ${esc(pair[1])}</span>`).join("");
+        return `<div class="search-hit" data-search-index="${r.index}">
+          <div class="search-hit-title"><span>${esc(name)}</span><span class="search-hit-status">${esc(status)}</span></div>
+          <div class="search-hit-fields">${summ}</div>
+        </div>`;
+      }).join("") + (results.length > MAX ? `<div class="search-empty">上位${MAX}件を表示（他 ${results.length - MAX} 件）。条件を追加してください。</div>` : "");
+    }
+
+    function openSearchModal() {
+      buildSearchForm();
+      renderFormResults();
+      document.getElementById("searchModal").classList.add("open");
+      const first = document.querySelector("#searchForm .sf-input");
+      if (first) setTimeout(() => first.focus(), 0);
+    }
+
+    function closeSearchModal() {
+      document.getElementById("searchModal").classList.remove("open");
+    }
+
+    function clearSearchForm() {
+      buildSearchForm();
+      renderFormResults();
+      const first = document.querySelector("#searchForm .sf-input");
+      if (first) first.focus();
+    }
+
+    function openSearchResult(index) {
+      // 簡易検索の絞り込みを解除してから対象を開く(renderRecordSelectによるcurrentIndex書き換え回避)
+      document.getElementById("recordSearch").value = "";
+      document.getElementById("statusQuickFilter").value = "";
+      currentIndex = index;
+      renderRecord();
+      closeSearchModal();
+    }
+
     document.addEventListener("input", event => {
       const target = event.target;
       const record = currentRecord();
@@ -4596,6 +4794,26 @@
     document.getElementById("statusQuickFilter").addEventListener("change", () => { renderRecordSelect(); renderRecord(); });
     document.getElementById("recordSelect").addEventListener("change", event => { currentIndex = Number(event.target.value); renderRecord(); });
 
+    document.getElementById("openSearchBtn").addEventListener("click", openSearchModal);
+    document.getElementById("searchCloseBtn").addEventListener("click", closeSearchModal);
+    document.getElementById("searchRunBtn").addEventListener("click", renderFormResults);
+    document.getElementById("searchClearBtn").addEventListener("click", clearSearchForm);
+    document.getElementById("searchForm").addEventListener("input", renderFormResults);
+    document.getElementById("searchForm").addEventListener("change", renderFormResults);
+    document.getElementById("searchForm").addEventListener("keydown", event => {
+      if (event.key === "Enter") { event.preventDefault(); renderFormResults(); }
+    });
+    document.getElementById("searchResults").addEventListener("click", event => {
+      const hit = event.target.closest(".search-hit");
+      if (hit) openSearchResult(Number(hit.dataset.searchIndex));
+    });
+    document.getElementById("searchModal").addEventListener("click", event => {
+      if (event.target.id === "searchModal") closeSearchModal();
+    });
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape" && document.getElementById("searchModal").classList.contains("open")) closeSearchModal();
+    });
+
     document.getElementById("newRecordBtn").addEventListener("click", () => {
       records.push(createBlankRecord());
       currentIndex = records.length - 1;
@@ -4625,11 +4843,11 @@
     });
 
     document.getElementById("csvBtn").addEventListener("click", () => {
-      const headers = ["屋号","商流","申込日","検収日","工事予定日","進捗ステータス","リース会社","購入方法","月額税別","料率","回数","月額/料率%","仕切り合計","粗利","明細種別","商材","メーカー/外注先","仕入れ先","型番","個数","仕切り単価","納期予定日","納品状況","備考"];
+      const headers = ["屋号","商流","申込日","検収日","工事予定日","契約書受渡（発送）日","進捗ステータス","リース会社","購入方法","月額税別","料率","回数","月額/料率%","仕切り合計","粗利","明細種別","商材","メーカー/外注先","仕入れ先","型番","個数","仕切り単価","納期予定日","納品状況","備考"];
       const rows = [];
       records.forEach(record => {
         (record.items || [blankItem()]).forEach(item => {
-          rows.push([record.fields.customerName, record.fields.route, record.fields.applicationDate, record.fields.inspectionDate, record.fields.constructionDate, record.fields.progressStatus, record.fields.leaseCompany, record.purchase.method, record.purchase.monthly, record.purchase.rate, record.purchase.times, calcBaseAmount(record), calcItemTotal(record), calcGross(record), item.type, item.product, item.maker, item.supplier, item.model, item.qty, item.unitCost, item.deliveryDate, item.deliveryStatus, item.remark]);
+          rows.push([record.fields.customerName, record.fields.route, record.fields.applicationDate, record.fields.inspectionDate, record.fields.constructionDate, record.fields.documentHandoverDate, record.fields.progressStatus, record.fields.leaseCompany, record.purchase.method, record.purchase.monthly, record.purchase.rate, record.purchase.times, calcBaseAmount(record), calcItemTotal(record), calcGross(record), item.type, item.product, item.maker, item.supplier, item.model, item.qty, item.unitCost, item.deliveryDate, item.deliveryStatus, item.remark]);
         });
       });
       const csv = [headers, ...rows].map(row => row.map(cell => `"${String(cell ?? "").replaceAll('"', '""')}"`).join(",")).join("\n");
