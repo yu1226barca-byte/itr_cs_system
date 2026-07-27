@@ -3253,6 +3253,18 @@
     .search-hit-fields { margin-top: 6px; font-size: 12px; color: #475569; line-height: 1.7; }
     .search-hit-fields span { display: inline-block; margin-right: 12px; }
     .search-empty { padding: 20px 18px; text-align: center; color: #94a3b8; font-size: 13px; }
+
+    /* ★納品書：印字する物品の選択 */
+    #deliveryItemModal .modal-card { width: min(680px, 96vw); }
+    #deliveryItemModal .modal-body { padding: 0; }
+    .di-toolbar { padding: 12px 18px 6px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .di-toolbar .di-note { font-size: 12px; color: #64748b; }
+    .di-list { max-height: 55vh; overflow-y: auto; padding: 4px 18px 12px; }
+    .di-row { display: flex; gap: 10px; align-items: flex-start; padding: 9px 10px; border: 1px solid #e2e8f0; border-radius: 10px; margin: 6px 0; cursor: pointer; }
+    .di-row:hover { background: #f1f5f9; }
+    .di-row input { margin-top: 2px; width: 16px; height: 16px; flex: none; }
+    .di-text { font-size: 13px; color: #0f172a; line-height: 1.5; }
+    .di-type { display: inline-block; font-size: 11px; font-weight: 700; color: #1e3a8a; background: #dbeafe; border-radius: 9999px; padding: 1px 8px; margin-right: 6px; }
     @media (max-width: 640px) { .sf-grid { grid-template-columns: max-content 1fr; } }
 
   </style>
@@ -3380,6 +3392,26 @@
     </div>
   </div>
 
+
+  <div class="modal" id="deliveryItemModal" role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <div class="modal-head">
+        <strong>納品書に印字する物品を選択</strong>
+        <button class="btn-ghost btn-small" id="deliveryItemCloseBtn" type="button">閉じる</button>
+      </div>
+      <div class="modal-body">
+        <div class="di-toolbar">
+          <button class="btn-ghost btn-small" id="deliveryItemAllBtn" type="button">すべて選択</button>
+          <button class="btn-ghost btn-small" id="deliveryItemNoneBtn" type="button">すべて解除</button>
+          <span class="di-note">チェックした物品だけが納品書に印字されます。</span>
+        </div>
+        <div class="di-list" id="deliveryItemList"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-primary" id="deliveryItemRunBtn" type="button">この内容で納品書を作成</button>
+      </div>
+    </div>
+  </div>
 
   <div id="deliveryPrintArea" class="delivery-print-area" aria-hidden="true"></div>
 
@@ -4175,10 +4207,11 @@
       return visible.length ? visible : [blankItem()];
     }
 
-    function buildDeliveryNoteHtml(record) {
+    function buildDeliveryNoteHtml(record, selectedItems) {
       function buildCopy(copyLabel) {
         const f = record.fields || {};
-        const items = safeDeliveryItems(record);
+        // 選択された物品があればそれだけを印字（未指定なら従来どおり自動抽出）
+        const items = (selectedItems && selectedItems.length) ? selectedItems : safeDeliveryItems(record);
         const customerName = f.customerName || record.sheetName || "";
         const customerWithHonorific = customerName ? `${customerName}　御中` : "";
         const rows = items.map((item, index) => `
@@ -4279,7 +4312,68 @@
       return buildCopy("お客様控え") + buildCopy("弊社控え");
     }
 
-    function createDeliveryPdf() {
+    /* ★納品書：印字する物品の選択 */
+    // 印字候補（名称が何か入っている明細行）のインデックス
+    function deliveryCandidateIndexes(record) {
+      const items = Array.isArray(record.items) ? record.items : [];
+      const out = [];
+      items.forEach((item, i) => {
+        const hasName = [item.product, item.maker, item.model, item.supplier].some(v => String(v || "").trim());
+        if (hasName) out.push(i);
+      });
+      return out;
+    }
+
+    function openDeliveryItemPicker() {
+      const record = currentRecord();
+      if (!record) {
+        alert("納品書を作成する案件がありません。");
+        return;
+      }
+      recalcView();
+
+      const box = document.getElementById("deliveryItemList");
+      const idxs = deliveryCandidateIndexes(record);
+      if (!idxs.length) {
+        box.innerHTML = `<div class="search-empty">印字できる明細がありません。このまま作成すると空欄の納品書になります。</div>`;
+      } else {
+        box.innerHTML = idxs.map(i => {
+          const it = record.items[i] || {};
+          const checked = it.type === "返金" ? "" : "checked"; // 返金は既定で印字しない
+          const detail = [it.product, it.maker, it.model, it.qty ? `数量 ${it.qty}` : ""]
+            .map(v => String(v || "").trim()).filter(Boolean).join("　/　");
+          const typeChip = it.type ? `<span class="di-type">${esc(it.type)}</span>` : "";
+          return `<label class="di-row"><input type="checkbox" class="di-check" value="${i}" ${checked} /><span class="di-text">${typeChip}${esc(detail)}</span></label>`;
+        }).join("");
+      }
+      document.getElementById("deliveryItemModal").classList.add("open");
+    }
+
+    function closeDeliveryItemPicker() {
+      document.getElementById("deliveryItemModal").classList.remove("open");
+    }
+
+    function setAllDeliveryItems(checked) {
+      document.querySelectorAll("#deliveryItemList .di-check").forEach(el => { el.checked = checked; });
+    }
+
+    function confirmDeliveryPdf() {
+      const record = currentRecord();
+      if (!record) return;
+      const boxes = document.querySelectorAll("#deliveryItemList .di-check");
+      const picked = Array.from(boxes)
+        .filter(el => el.checked)
+        .map(el => record.items[Number(el.value)])
+        .filter(Boolean);
+      if (boxes.length && !picked.length) {
+        alert("印字する物品を1つ以上選んでください。");
+        return;
+      }
+      closeDeliveryItemPicker(); // 印刷前に必ず閉じる（印刷結果に出さないため）
+      createDeliveryPdf(picked.length ? picked : null);
+    }
+
+    function createDeliveryPdf(selectedItems) {
       const record = currentRecord();
       if (!record) {
         alert("納品書を作成する案件がありません。");
@@ -4289,7 +4383,7 @@
       recalcView();
 
       const area = document.getElementById("deliveryPrintArea");
-      area.innerHTML = buildDeliveryNoteHtml(record);
+      area.innerHTML = buildDeliveryNoteHtml(record, selectedItems);
 
       document.body.classList.add("printing-delivery");
 
@@ -4848,7 +4942,7 @@
         renderRecord();
       }
       if (target.id === "printBtn") window.print();
-      if (target.id === "deliveryPdfBtn" || target.id === "deliveryPdfBtnInline") createDeliveryPdf();
+      if (target.id === "deliveryPdfBtn" || target.id === "deliveryPdfBtnInline") openDeliveryItemPicker();
       if (target.id === "resetSeedBtn") {
         if (!confirm("初期データを再読込します。現在の保存データは上書きされます。よろしいですか？")) return;
         records = normalizeRecords(deepCopy(SEED_RECORDS));
@@ -4875,6 +4969,16 @@
 
     document.getElementById("openSearchBtn").addEventListener("click", openSearchModal);
     document.getElementById("searchCloseBtn").addEventListener("click", closeSearchModal);
+    document.getElementById("deliveryItemCloseBtn").addEventListener("click", closeDeliveryItemPicker);
+    document.getElementById("deliveryItemRunBtn").addEventListener("click", confirmDeliveryPdf);
+    document.getElementById("deliveryItemAllBtn").addEventListener("click", () => setAllDeliveryItems(true));
+    document.getElementById("deliveryItemNoneBtn").addEventListener("click", () => setAllDeliveryItems(false));
+    document.getElementById("deliveryItemModal").addEventListener("click", event => {
+      if (event.target.id === "deliveryItemModal") closeDeliveryItemPicker();
+    });
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape" && document.getElementById("deliveryItemModal").classList.contains("open")) closeDeliveryItemPicker();
+    });
     document.getElementById("searchRunBtn").addEventListener("click", renderFormResults);
     document.getElementById("searchClearBtn").addEventListener("click", clearSearchForm);
     document.getElementById("searchForm").addEventListener("input", renderFormResults);
