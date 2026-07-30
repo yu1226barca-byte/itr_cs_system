@@ -3343,10 +3343,10 @@
         </div>
         <div class="chart-card">
           <div class="chart-head">
-            <div class="chart-title">商流（担当者）別 実績</div>
-            <div class="chart-note">件数・粗利・平均粗利</div>
+            <div class="chart-title">月次 受注件数・粗利</div>
+            <div class="chart-note" id="monthlyBreakdownNote">基準日は左のグラフと連動</div>
           </div>
-          <div class="breakdown-wrap"><table class="breakdown-table" id="routeBreakdown"></table></div>
+          <div class="breakdown-wrap"><table class="breakdown-table" id="monthlyBreakdown"></table></div>
         </div>
         <div class="chart-card">
           <div class="chart-head">
@@ -4478,18 +4478,30 @@
       document.getElementById("metricLeadTime").textContent =
         spans.length ? Math.round(spans.reduce((s, v) => s + v, 0) / spans.length) + "日" : "-";
 
-      renderBreakdown("routeBreakdown", "商流", r => r.fields.route || "(未設定)");
+      // 月次は「月間 粗利推移」グラフと同じ基準日で集計する
+      const basis = document.getElementById("basisDate")?.value || "applicationDate";
+      renderBreakdown("monthlyBreakdown", "年月", r => {
+        const d = normalizeDate(r.fields[basis]);
+        return d ? d.slice(0, 7).replace("-", "/") : "";
+      }, "key-desc");
       renderBreakdown("leaseBreakdown", "リース会社", r => r.fields.leaseCompany || "(未設定)");
+
+      const basisLabel = { applicationDate: "申込日", inspectionDate: "検収日", constructionDate: "工事予定日" }[basis] || basis;
+      const note = document.getElementById("monthlyBreakdownNote");
+      if (note) note.textContent = "基準日：" + basisLabel;
+
       renderCharts();
     }
 
     // 指定のキーごとに 件数・粗利・平均粗利 を集計して表にする
-    function renderBreakdown(elementId, label, keyOf) {
+    // sortBy: "gross"（粗利の多い順、既定） / "key-desc"（キーの降順＝新しい月が上）
+    function renderBreakdown(elementId, label, keyOf, sortBy) {
       const el = document.getElementById(elementId);
       if (!el) return;
       const map = new Map();
       records.filter(isDealRecord).forEach(r => {
         const k = keyOf(r);
+        if (!k) return;   // 基準日が未入力の案件は集計しない
         const cur = map.get(k) || { count: 0, gross: 0 };
         cur.count++;
         cur.gross += calcGross(r);
@@ -4499,7 +4511,8 @@
         el.innerHTML = `<tr><td class="breakdown-empty">データがありません</td></tr>`;
         return;
       }
-      const rows = Array.from(map.entries()).sort((a, b) => b[1].gross - a[1].gross);
+      const rows = Array.from(map.entries()).sort((a, b) =>
+        sortBy === "key-desc" ? String(b[0]).localeCompare(String(a[0])) : b[1].gross - a[1].gross);
       const totalCount = rows.reduce((s, x) => s + x[1].count, 0);
       const totalGross = rows.reduce((s, x) => s + x[1].gross, 0);
       el.innerHTML =
