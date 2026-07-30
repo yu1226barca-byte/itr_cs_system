@@ -156,10 +156,18 @@
       <div class="table-scroll" style="margin-top:10px"><table class="grid" id="reserveTable"></table></div>
     </div>
 
-    <!-- インセンティブ集計 -->
+    <!-- 工事・保守歩合 -->
     <div class="card">
-      <h2>【営業インセンティブ集計（当月案件・次月支給の参考）】</h2>
-      <div class="table-scroll"><table class="grid" id="incenTable"></table></div>
+      <h2>【工事・保守 歩合明細】<span class="h-actions"><button class="btn small" id="addBuaiBtn" type="button">＋行追加</button></span></h2>
+      <div class="table-scroll"><table class="grid" id="buaiTable"></table></div>
+      <div class="note">内容を選ぶと金額が自動セットされます（工事 30,000／保守 5,000／リモート 1,000。手入力で上書き可）。担当は既定で大坪。</div>
+    </div>
+
+    <!-- 給与計算 -->
+    <div class="card">
+      <h2>【アポインター・工事保守 給与計算（参考）】</h2>
+      <div class="table-scroll"><table class="grid" id="payrollTable"></table></div>
+      <div class="note">支給合計 ＝ 固定給（手入力）＋ アポインセン（収益テーブルのインセン先×%を自動集計）＋ 工事・保守歩合（歩合明細を担当別に自動集計）。<b>参考値です。経費への算入は【担当者別】ブロックに入力してください</b>（Excel運用と同じ）。</div>
     </div>
   </div>
 
@@ -200,10 +208,10 @@
     <div class="modal-head"><strong>当月の計算パラメータ</strong><button class="btn small" id="settingsCloseBtn" type="button">閉じる</button></div>
     <div class="modal-body">
       <table class="grid">
-        <tr><th style="width:45%">配分率（新規行の初期値）</th><td><input id="setBunpai" class="num" type="number" step="0.01" /></td></tr>
-        <tr><th>経費単価の分母（案件数）<div style="font-weight:400;font-size:11px;color:var(--sub)">空欄なら収益の入力行数を自動使用</div></th><td><input id="setKensu" class="num" type="number" step="1" placeholder="自動" /></td></tr>
+        <tr><th style="width:45%">経費単価の分母（案件数）<div style="font-weight:400;font-size:11px;color:var(--sub)">空欄なら収益の入力行数を自動使用</div></th><td><input id="setKensu" class="num" type="number" step="1" placeholder="自動" /></td></tr>
         <tr><th>インセンティブ%（新規行の初期値）</th><td><input id="setIncen" class="num" type="number" step="1" /> %</td></tr>
       </table>
+      <div class="note">※ 配分率は収益テーブルで案件ごとに手入力します。</div>
       <div style="text-align:right;margin-top:10px"><button class="btn primary" id="settingsSaveBtn" type="button">保存</button></div>
     </div>
   </div>
@@ -256,10 +264,15 @@ function blankMonth(key){
     ],
     alloc: [ { name: "水口", rate: 0.52 }, { name: "土肥", rate: 0.48 } ],
     reserve: { deposit: 0, balance: 0, withdraw: 0, withdrawTotal: 0 },
+    buai: [],            // 工事・保守歩合明細 {date, cust, type, amount, tanto}
+    payrollBase: {},     // アポインター等の固定給 {名前: 金額}
     updatedAt: ""
   };
 }
-function blankRevenue(m){ return { name:"", nyukin:"", listFee:"", shiire:"", ritsu: m.params.bunpai, shinsa:"", incenTo:"", incenPct: m.params.incenPct }; }
+// 配分率は案件ごとに手入力（初期値は空欄）
+function blankRevenue(m){ return { name:"", nyukin:"", listFee:"", shiire:"", ritsu: "", shinsa:"", incenTo:"", incenPct: m.params.incenPct }; }
+// 工事・保守歩合の単価（内容を選ぶと自動セット。金額は編集可）
+const BUAI_PRICES = { "工事": 30000, "保守": 5000, "リモート": 1000 };
 
 /* ========== 計算 ========== */
 function rvGross(r){ return num(r.nyukin) - num(r.listFee) - num(r.shiire); }
@@ -311,7 +324,7 @@ function renderAll(){
   document.getElementById("hoshuView").style.display = viewMode==="hoshu" ? "" : "none";
   if (viewMode === "hoshu") { renderHoshu(); return; }
   if (!m()) return;
-  renderKpi(); renderRevenue(); renderExpense(); renderStaff(); renderAlloc(); renderIncen();
+  renderKpi(); renderRevenue(); renderExpense(); renderStaff(); renderAlloc(); renderBuai(); renderPayroll();
 }
 
 function renderKpi(){
@@ -325,10 +338,19 @@ function renderKpi(){
     <div class="kpi hl"><span>③本社純利益（①−②）</span><strong>${yenS(c.honsha)}</strong></div>`;
 }
 
+// インセン先・給与計算に出てくる名前の候補（担当者・分配対象・過去のインセン先・歩合担当・固定給登録者）
+function knownNames(md){
+  const names = (md.staff||[]).map(s=>s.name)
+    .concat((md.alloc||[]).map(a=>a.name))
+    .concat((md.revenues||[]).map(r=>r.incenTo))
+    .concat((md.buai||[]).map(b=>b.tanto))
+    .concat(Object.keys(md.payrollBase||{}));
+  return Array.from(new Set(names.map(n=>String(n||"").trim()).filter(Boolean)));
+}
+
 function renderRevenue(){
   const md = m(); const c = calcMonth(md);
-  const staffNames = (md.staff||[]).map(s=>s.name).concat((md.alloc||[]).map(a=>a.name));
-  const names = Array.from(new Set(staffNames)).filter(Boolean);
+  const names = knownNames(md);
   const head = `<tr><th style="width:26px">No</th><th style="min-width:150px">会社名</th><th class="num">入金予定額(税抜)</th><th class="num">リスト元手数料</th><th class="num">仕入れ・部材費</th><th class="num">粗利</th><th class="num">純利益</th><th class="num" style="width:56px">配分率</th><th class="num">事業部総利益単価</th><th>リース審査</th><th>インセン先</th><th class="num" style="width:46px">%</th><th style="width:26px"></th></tr>`;
   const body = (md.revenues||[]).map((r,i) => {
     const g = rvGross(r), j = g - c.tanka, t = j * num(r.ritsu);
@@ -344,7 +366,7 @@ function renderRevenue(){
       <td><input class="num" data-rv="${i}" data-f="ritsu" inputmode="decimal" value="${esc(r.ritsu)}" /></td>
       <td class="calc">${filled?yenS(t):""}</td>
       <td><input data-rv="${i}" data-f="shinsa" value="${esc(r.shinsa)}" list="shinsaList" /></td>
-      <td><select data-rv="${i}" data-f="incenTo"><option value=""></option>${names.map(n=>`<option ${r.incenTo===n?"selected":""}>${esc(n)}</option>`).join("")}</select></td>
+      <td><input data-rv="${i}" data-f="incenTo" value="${esc(r.incenTo)}" list="incenToList" placeholder="アポインター名" /></td>
       <td><input class="num" data-rv="${i}" data-f="incenPct" inputmode="numeric" value="${esc(r.incenPct)}" /></td>
       <td><button class="del-btn" data-del-rv="${i}" type="button">✕</button></td>
     </tr>`;
@@ -355,7 +377,8 @@ function renderRevenue(){
     <td class="num">${yen((md.revenues||[]).reduce((a,r)=>a+num(r.shiire),0))}</td>
     <td class="num">${yenS(c.gross)}</td><td class="num">${yenS(c.jun)}</td><td></td><td class="num">${yenS(c.jigyobu)}</td><td colspan="4"></td></tr>`;
   document.getElementById("revenueTable").innerHTML = head + body + total
-    + `<datalist id="shinsaList"><option>可決</option><option>否決</option><option>審査中</option><option>現金</option></datalist>`;
+    + `<datalist id="shinsaList"><option>可決</option><option>否決</option><option>審査中</option><option>現金</option></datalist>`
+    + `<datalist id="incenToList">${names.map(n=>`<option>${esc(n)}</option>`).join("")}</datalist>`;
 }
 
 function renderExpense(){
@@ -416,14 +439,56 @@ function renderAlloc(){
     </tr>`;
 }
 
-function renderIncen(){
-  const map = incenSummary(m());
-  if (!map.size) { document.getElementById("incenTable").innerHTML = `<tr><td style="color:var(--sub);border:none">インセン先が設定された案件はありません。収益テーブルの「インセン先」で担当者を選ぶと集計されます。</td></tr>`; return; }
-  let html = `<tr><th>担当者</th><th>対象案件（粗利×%）</th><th class="num" style="width:140px">合計（次月支給の参考）</th></tr>`;
-  map.forEach((v,k)=>{
-    html += `<tr><td><b>${esc(k)}</b></td><td>${v.rows.map(r=>`${esc(r.name)}（${yenS(r.v)}）`).join("、 ")}</td><td class="num"><b>${yenS(v.total)}</b></td></tr>`;
+function buaiSummary(md){
+  const map = new Map();
+  (md.buai||[]).forEach(b => {
+    const t = String(b.tanto||"").trim();
+    if (!t) return;
+    map.set(t, (map.get(t)||0) + num(b.amount));
   });
-  document.getElementById("incenTable").innerHTML = html;
+  return map;
+}
+
+function renderBuai(){
+  const md = m();
+  const head = `<tr><th style="width:26px">No</th><th style="width:130px">日付</th><th style="min-width:150px">顧客</th><th style="width:110px">内容</th><th class="num" style="width:100px">金額</th><th style="width:90px">担当</th><th style="width:26px"></th></tr>`;
+  const body = (md.buai||[]).map((b,i)=>`<tr>
+    <td class="num">${i+1}</td>
+    <td><input type="date" data-bu="${i}" data-f="date" value="${esc(b.date)}" /></td>
+    <td><input data-bu="${i}" data-f="cust" value="${esc(b.cust)}" /></td>
+    <td><select data-bu="${i}" data-f="type"><option value=""></option>${Object.keys(BUAI_PRICES).map(k=>`<option ${b.type===k?"selected":""}>${k}</option>`).join("")}<option ${b.type==="その他"?"selected":""}>その他</option></select></td>
+    <td><input class="num" data-bu="${i}" data-f="amount" inputmode="numeric" value="${esc(b.amount)}" /></td>
+    <td><input data-bu="${i}" data-f="tanto" value="${esc(b.tanto)}" list="incenToList" /></td>
+    <td><button class="del-btn" data-del-bu="${i}" type="button">✕</button></td></tr>`).join("");
+  const total = `<tr class="total"><td></td><td colspan="3">合計（${(md.buai||[]).length}件）</td><td class="num">${yen((md.buai||[]).reduce((a,b)=>a+num(b.amount),0))}</td><td colspan="2"></td></tr>`;
+  document.getElementById("buaiTable").innerHTML = head + body + total;
+}
+
+function renderPayroll(){
+  const md = m();
+  const incMap = incenSummary(md);
+  const buaiMap = buaiSummary(md);
+  const names = Array.from(new Set([...incMap.keys(), ...buaiMap.keys(), ...Object.keys(md.payrollBase||{})]))
+    .map(n=>n.trim()).filter(Boolean);
+  if (!names.length) {
+    document.getElementById("payrollTable").innerHTML = `<tr><td style="color:var(--sub);border:none">収益テーブルの「インセン先」や歩合明細の「担当」に名前を入れると、ここに給与計算が表示されます。</td></tr>`;
+    return;
+  }
+  const head = `<tr><th>名前</th><th class="num" style="width:120px">固定給（手入力）</th><th class="num" style="width:130px">アポインセン</th><th class="num" style="width:130px">工事・保守歩合</th><th class="num" style="width:140px">支給合計（参考）</th></tr>`;
+  let tBase=0, tInc=0, tBuai=0;
+  const body = names.map(n => {
+    const base = num((md.payrollBase||{})[n]);
+    const inc = incMap.get(n) ? incMap.get(n).total : 0;
+    const bu = buaiMap.get(n) || 0;
+    tBase+=base; tInc+=inc; tBuai+=bu;
+    const detail = incMap.get(n) ? `<div style="font-size:11px;color:var(--sub)">${incMap.get(n).rows.map(r=>`${esc(r.name)}(${yenS(r.v)})`).join("、")}</div>` : "";
+    return `<tr><td><b>${esc(n)}</b>${detail}</td>
+      <td><input class="num" data-pay="${esc(n)}" inputmode="numeric" value="${base||""}" /></td>
+      <td class="calc">${inc?yenS(inc):""}</td><td class="calc">${bu?yenS(bu):""}</td>
+      <td class="calc">${yenS(base+inc+bu)}</td></tr>`;
+  }).join("");
+  const total = `<tr class="total"><td>合計</td><td class="num">${yen(tBase)}</td><td class="num">${yenS(tInc)}</td><td class="num">${yenS(tBuai)}</td><td class="num">${yenS(tBase+tInc+tBuai)}</td></tr>`;
+  document.getElementById("payrollTable").innerHTML = head + body + total;
 }
 
 function renderHoshu(){
@@ -569,6 +634,8 @@ document.addEventListener("click", ev => {
   if (t.id === "addStaffBtn") { m().staff.push({name:"新担当", items:[{label:"健康保険会社負担分",amount:0,memo:""},{label:"厚生年金会社負担分",amount:0,memo:""},{label:"労働保険会社負担分",amount:0,memo:""}]}); markDirty(currentMonth); renderAll(); }
   if (t.id === "addAllocBtn") { m().alloc.push({name:"",rate:0}); markDirty(currentMonth); renderAll(); }
   if (t.id === "addHoshuBtn") { hoshu.rows.push({appDate:"",payDate:"",name:"",tekiyo:"",monthly:"",memo:""}); markDirty("hoshu"); renderAll(); }
+  if (t.id === "addBuaiBtn") { m().buai.push({date:"",cust:"",type:"",amount:"",tanto:"大坪"}); markDirty(currentMonth); renderAll(); }
+  if (t.dataset.delBu !== undefined && confirm("この歩合行を削除しますか？")) { m().buai.splice(Number(t.dataset.delBu),1); markDirty(currentMonth); renderAll(); }
   if (t.dataset.addItem !== undefined) { m().staff[Number(t.dataset.addItem)].items.push({label:"",amount:"",memo:""}); markDirty(currentMonth); renderAll(); }
   if (t.dataset.delRv !== undefined && confirm("この収益行を削除しますか？")) { m().revenues.splice(Number(t.dataset.delRv),1); markDirty(currentMonth); renderAll(); }
   if (t.dataset.delEx !== undefined && confirm("この経費行を削除しますか？")) { m().expenses.splice(Number(t.dataset.delEx),1); markDirty(currentMonth); renderAll(); }
@@ -598,6 +665,22 @@ document.addEventListener("input", ev => {
   else if (t.dataset.staffName !== undefined) { md.staff[Number(t.dataset.staffName)].name = t.value; markDirty(currentMonth); }
   else if (t.dataset.al !== undefined) { md.alloc[Number(t.dataset.al)][t.dataset.f] = t.value; markDirty(currentMonth); refreshCalcOnly(); }
   else if (t.dataset.rs !== undefined) { md.reserve[t.dataset.rs] = t.value; markDirty(currentMonth); refreshCalcOnly(); }
+  else if (t.dataset.bu !== undefined) {
+    const row = md.buai[Number(t.dataset.bu)];
+    row[t.dataset.f] = t.value;
+    // 内容を選んだら単価を自動セット（未入力または既定単価のままの場合のみ上書き）
+    if (t.dataset.f === "type") {
+      const preset = BUAI_PRICES[t.value];
+      const cur = num(row.amount);
+      if (preset !== undefined && (!cur || Object.values(BUAI_PRICES).includes(cur))) {
+        row.amount = preset;
+        const amtInput = document.querySelector(`[data-bu="${t.dataset.bu}"][data-f="amount"]`);
+        if (amtInput) amtInput.value = preset;
+      }
+    }
+    markDirty(currentMonth); refreshCalcOnly();
+  }
+  else if (t.dataset.pay !== undefined) { md.payrollBase = md.payrollBase || {}; md.payrollBase[t.dataset.pay] = t.value; markDirty(currentMonth); }
   else if (t.dataset.ho !== undefined) { hoshu.rows[Number(t.dataset.ho)][t.dataset.f] = t.value; markDirty("hoshu"); }
 });
 // 入力中はフォーカスを壊さないよう、blur時に全再描画
@@ -625,14 +708,12 @@ function addMonth(){
 
 function openSettings(){
   const p = m().params;
-  document.getElementById("setBunpai").value = p.bunpai;
   document.getElementById("setKensu").value = p.kensu ?? "";
   document.getElementById("setIncen").value = p.incenPct;
   document.getElementById("settingsModal").classList.add("open");
 }
 function saveSettings(){
   const p = m().params;
-  p.bunpai = num(document.getElementById("setBunpai").value) || 0.66;
   const k = document.getElementById("setKensu").value;
   p.kensu = k === "" ? null : num(k);
   p.incenPct = num(document.getElementById("setIncen").value) || 10;
