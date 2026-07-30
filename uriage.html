@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>月間売上管理表｜システムITR事業部</title>
+<style>
+  :root {
+    --bg: #eef3f9; --card: #ffffff; --ink: #0f172a; --sub: #475569;
+    --line: #dbe4f0; --accent: #1e3a8a; --accent2: #2563eb;
+    --ok: #047857; --warn: #b45309; --bad: #b91c1c;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif; background: var(--bg); color: var(--ink); font-size: 14px; }
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 16px; }
+  header.top { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  header.top h1 { font-size: 20px; margin: 0; color: var(--accent); }
+  .top-links { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; }
+  .top-links a { color: var(--accent2); }
+  .auth-state { font-size: 12px; color: var(--sub); }
+
+  .btn { border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 7px 14px; font-size: 13px; cursor: pointer; font-weight: 700; color: var(--ink); }
+  .btn:hover { background: #f1f5f9; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { background: #16307a; }
+  .btn.danger { color: var(--bad); }
+  .btn.small { padding: 3px 9px; font-size: 12px; }
+
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; align-items: center; }
+  .tab { border: 1px solid var(--line); background: #fff; border-radius: 9999px; padding: 6px 16px; cursor: pointer; font-weight: 700; font-size: 13px; }
+  .tab.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; margin-bottom: 14px; box-shadow: 0 4px 14px rgba(15,23,42,.05); }
+  .card h2 { font-size: 15px; margin: 0 0 10px; color: var(--accent); display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .card h2 .h-actions { display: flex; gap: 6px; }
+
+  table.grid { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.grid th, table.grid td { border: 1px solid var(--line); padding: 4px 6px; }
+  table.grid th { background: #f1f5f9; font-weight: 700; font-size: 12px; white-space: nowrap; }
+  table.grid td.num, table.grid th.num { text-align: right; }
+  table.grid td.calc { background: #f8fafc; text-align: right; font-weight: 700; white-space: nowrap; }
+  table.grid input, table.grid select { width: 100%; border: none; background: transparent; font: inherit; padding: 3px 2px; outline: none; }
+  table.grid input:focus { background: #eff6ff; }
+  table.grid input.num { text-align: right; }
+  table.grid tr.total td { background: #eef2ff; font-weight: 700; }
+  .del-btn { border: none; background: none; color: var(--bad); cursor: pointer; font-size: 14px; padding: 0 4px; }
+  .table-scroll { overflow-x: auto; }
+
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 4px; }
+  .kpi { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: #f8fafc; }
+  .kpi span { display: block; font-size: 11px; color: var(--sub); margin-bottom: 4px; }
+  .kpi strong { font-size: 17px; }
+  .kpi.hl { background: #eef2ff; border-color: #c7d2fe; }
+
+  .staff-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+  .staff-card { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+  .staff-card h3 { margin: 0 0 8px; font-size: 14px; display: flex; justify-content: space-between; align-items: center; }
+  .staff-foot { font-size: 12px; color: var(--sub); margin-top: 6px; line-height: 1.8; }
+  .staff-foot b { color: var(--ink); font-size: 13px; }
+
+  .note { font-size: 11px; color: var(--sub); margin-top: 6px; line-height: 1.6; }
+  .save-state { font-size: 12px; color: var(--sub); }
+
+  .modal { position: fixed; inset: 0; background: rgba(15,23,42,.45); display: none; align-items: center; justify-content: center; z-index: 100; padding: 16px; }
+  .modal.open { display: flex; }
+  .modal-card { width: min(760px, 96vw); max-height: 90vh; overflow-y: auto; background: #fff; border-radius: 16px; box-shadow: 0 30px 80px rgba(15,23,42,.3); }
+  .modal-head { padding: 14px 18px; background: linear-gradient(135deg, #111f3d, #1e3a8a); color: #fff; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; }
+  .modal-head strong { font-size: 15px; }
+  .modal-head .btn { background: transparent; color: #fff; border-color: rgba(255,255,255,.4); }
+  .modal-body { padding: 16px 18px; }
+  .imp-row { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; margin: 6px 0; cursor: pointer; font-size: 13px; }
+  .imp-row:hover { background: #f1f5f9; }
+  .imp-row input { margin-top: 3px; }
+  .imp-row .sub { color: var(--sub); font-size: 12px; }
+  .imp-row.exists { opacity: .55; }
+
+  .login-overlay { position: fixed; inset: 0; background: var(--bg); z-index: 200; display: flex; align-items: center; justify-content: center; }
+  .login-card { background: #fff; border: 1px solid var(--line); border-radius: 16px; padding: 28px; width: min(380px, 92vw); box-shadow: 0 20px 60px rgba(15,23,42,.12); }
+  .login-card h2 { margin: 0 0 6px; font-size: 18px; color: var(--accent); }
+  .login-card p { margin: 0 0 14px; font-size: 12px; color: var(--sub); }
+  .login-card label { display: block; font-size: 12px; font-weight: 700; margin: 10px 0 4px; }
+  .login-card input { width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+  .login-card .btn { width: 100%; margin-top: 16px; padding: 10px; }
+  .login-error { color: var(--bad); font-size: 12px; margin-top: 10px; min-height: 16px; }
+
+  @media (max-width: 640px) {
+    .metrics { grid-template-columns: 1fr 1fr; }
+    table.grid { font-size: 12px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="login-overlay" id="loginOverlay">
+  <div class="login-card">
+    <h2>月間売上管理表</h2>
+    <p>許可されたアカウントでログインしてください。</p>
+    <label>メールアドレス</label>
+    <input id="loginEmail" type="email" autocomplete="email" />
+    <label>パスワード</label>
+    <input id="loginPassword" type="password" autocomplete="current-password" />
+    <button class="btn primary" id="loginBtn" type="button">ログイン</button>
+    <div class="login-error" id="loginError"></div>
+  </div>
+</div>
+
+<div class="wrap" id="app" style="display:none">
+  <header class="top">
+    <h1>📊 月間売上管理表</h1>
+    <div class="top-links">
+      <span class="save-state" id="saveState">読み込み中…</span>
+      <a href="index.html">受注顧客管理へ</a>
+      <button class="btn small" id="settingsBtn" type="button">⚙ 当月設定</button>
+      <button class="btn small" id="logoutBtn" type="button">ログアウト</button>
+    </div>
+  </header>
+
+  <div class="tabs" id="monthTabs"></div>
+
+  <div id="monthView">
+    <!-- KPI -->
+    <div class="card">
+      <div class="metrics" id="kpiArea"></div>
+      <div class="note">経費単価 ＝（④経費合計＋担当者ブロック合計）÷ 案件数。純利益 ＝ 粗利 − 経費単価。②事業部純利益 ＝ Σ(純利益×配分率)。③本社純利益 ＝ ① − ②。</div>
+    </div>
+
+    <!-- 収益 -->
+    <div class="card">
+      <h2>【収益】受注案件
+        <span class="h-actions">
+          <button class="btn small primary" id="importBtn" type="button">📥 受注顧客管理から取り込み</button>
+          <button class="btn small" id="addRevenueBtn" type="button">＋行追加</button>
+        </span>
+      </h2>
+      <div class="table-scroll"><table class="grid" id="revenueTable"></table></div>
+      <div class="note">粗利 ＝ 入金予定額 − リスト元手数料 − 仕入れ費。インセン先を選ぶと粗利×インセン%を担当者別に集計します（次月支給の参考値）。</div>
+    </div>
+
+    <!-- 経費 -->
+    <div class="card">
+      <h2>【当月事業部経費】<span class="h-actions"><button class="btn small" id="addExpenseBtn" type="button">＋行追加</button></span></h2>
+      <div class="table-scroll"><table class="grid" id="expenseTable"></table></div>
+    </div>
+
+    <!-- 担当者ブロック -->
+    <div class="card">
+      <h2>【担当者別 給与・社保・税】<span class="h-actions"><button class="btn small" id="addStaffBtn" type="button">＋担当者追加</button></span></h2>
+      <div class="staff-grid" id="staffArea"></div>
+      <div class="note">各担当者の項目合計（給与・立替・インセンティブ・社会保険など）は「当月経費社保合計」に算入されます。分配対象者（水口・土肥）は給与ではなく ④×分配比率 で支給されるため、社保のみ計上してください。</div>
+    </div>
+
+    <!-- 分配・内部留保 -->
+    <div class="card">
+      <h2>【事業部純利益の分配・内部留保】</h2>
+      <div class="table-scroll"><table class="grid" id="allocTable"></table></div>
+      <div class="table-scroll" style="margin-top:10px"><table class="grid" id="reserveTable"></table></div>
+    </div>
+
+    <!-- インセンティブ集計 -->
+    <div class="card">
+      <h2>【営業インセンティブ集計（当月案件・次月支給の参考）】</h2>
+      <div class="table-scroll"><table class="grid" id="incenTable"></table></div>
+    </div>
+  </div>
+
+  <!-- 保守契約一覧 -->
+  <div id="hoshuView" style="display:none">
+    <div class="card">
+      <h2>保守契約一覧<span class="h-actions"><button class="btn small" id="addHoshuBtn" type="button">＋行追加</button></span></h2>
+      <div class="table-scroll"><table class="grid" id="hoshuTable"></table></div>
+      <div class="note">年額保守料は月額×12を自動表示します（手入力で上書き可）。</div>
+    </div>
+  </div>
+</div>
+
+<!-- 取り込みモーダル -->
+<div class="modal" id="importModal">
+  <div class="modal-card">
+    <div class="modal-head"><strong>受注顧客管理から取り込み</strong><button class="btn small" id="importCloseBtn" type="button">閉じる</button></div>
+    <div class="modal-body">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+        <label style="font-size:12px;font-weight:700">基準日
+          <select id="importBasis" style="margin-left:6px;padding:4px 8px;border:1px solid var(--line);border-radius:8px">
+            <option value="applicationDate">申込日</option>
+            <option value="inspectionDate">検収日</option>
+            <option value="constructionDate" selected>工事予定日</option>
+          </select>
+        </label>
+        <span class="note" id="importNote"></span>
+      </div>
+      <div id="importList"></div>
+      <div style="text-align:right;margin-top:10px"><button class="btn primary" id="importRunBtn" type="button">チェックした案件を取り込む</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- 設定モーダル -->
+<div class="modal" id="settingsModal">
+  <div class="modal-card">
+    <div class="modal-head"><strong>当月の計算パラメータ</strong><button class="btn small" id="settingsCloseBtn" type="button">閉じる</button></div>
+    <div class="modal-body">
+      <table class="grid">
+        <tr><th style="width:45%">配分率（新規行の初期値）</th><td><input id="setBunpai" class="num" type="number" step="0.01" /></td></tr>
+        <tr><th>経費単価の分母（案件数）<div style="font-weight:400;font-size:11px;color:var(--sub)">空欄なら収益の入力行数を自動使用</div></th><td><input id="setKensu" class="num" type="number" step="1" placeholder="自動" /></td></tr>
+        <tr><th>インセンティブ%（新規行の初期値）</th><td><input id="setIncen" class="num" type="number" step="1" /> %</td></tr>
+      </table>
+      <div style="text-align:right;margin-top:10px"><button class="btn primary" id="settingsSaveBtn" type="button">保存</button></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+<script>
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCFIYGw6jeOpfuZYL55OR_FivwP9EB7jGA",
+  authDomain: "itr-cs-system.firebaseapp.com",
+  projectId: "itr-cs-system",
+  storageBucket: "itr-cs-system.firebasestorage.app",
+  messagingSenderId: "968069385767",
+  appId: "1:968069385767:web:db5767569c6b78240bc802"
+};
+const ALLOWED_EMAILS = ["yu1226barca@gmail.com"];
+const SALES_COLLECTION = "monthly_sales_records";   // 月ごと1ドキュメント（docId="2607"等）
+const HOSHU_DOC = "maintenance_contracts/list";      // 保守契約一覧
+const LEDGER_COLLECTION = "order_customer_records"; // 受注顧客管理（読み取りのみ）
+const STORAGE_KEY = "uriageAppData_v1";
+
+let db = null, auth = null, currentUser = null, cloudReady = false;
+let months = {};          // { "2607": monthData }
+let hoshu = { rows: [] };
+let currentMonth = "";    // 表示中の月キー
+let viewMode = "month";   // month | hoshu
+let saveTimer = null;
+let dirtyDocs = new Set();
+
+/* ========== ユーティリティ ========== */
+function esc(v){ return String(v ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;"); }
+function num(v){ if (v===null||v===undefined||v===""||v==="-") return 0; const n=Number(String(v).replaceAll(",","").replace(/[￥¥\s]/g,"")); return Number.isFinite(n)?n:0; }
+function yen(v){ return "￥" + Math.round(num(v)).toLocaleString("ja-JP"); }
+function yenS(v){ const n=Math.round(num(v)); return (n<0?"−￥"+Math.abs(n).toLocaleString("ja-JP"):"￥"+n.toLocaleString("ja-JP")); }
+function monthLabel(key){ return "20" + key.slice(0,2) + "年" + Number(key.slice(2)) + "月"; }
+function monthToYm(key){ return "20" + key.slice(0,2) + "-" + key.slice(2); }
+function nowKey(){ const d=new Date(); return String(d.getFullYear()).slice(2) + String(d.getMonth()+1).padStart(2,"0"); }
+
+function blankMonth(key){
+  return {
+    id: key,
+    params: { bunpai: 0.66, kensu: null, incenPct: 10 },
+    revenues: [],
+    expenses: [ { name: "事務員人件費", amount: 0, memo: "" } ],
+    staff: [
+      { name: "水口", items: [ {label:"健康保険会社負担分",amount:0,memo:""},{label:"厚生年金会社負担分",amount:0,memo:""},{label:"労働保険会社負担分",amount:0,memo:""} ] },
+      { name: "土肥", items: [ {label:"健康保険会社負担分",amount:0,memo:""},{label:"厚生年金会社負担分",amount:0,memo:""},{label:"労働保険会社負担分",amount:0,memo:""} ] }
+    ],
+    alloc: [ { name: "水口", rate: 0.52 }, { name: "土肥", rate: 0.48 } ],
+    reserve: { deposit: 0, balance: 0, withdraw: 0, withdrawTotal: 0 },
+    updatedAt: ""
+  };
+}
+function blankRevenue(m){ return { name:"", nyukin:"", listFee:"", shiire:"", ritsu: m.params.bunpai, shinsa:"", incenTo:"", incenPct: m.params.incenPct }; }
+
+/* ========== 計算 ========== */
+function rvGross(r){ return num(r.nyukin) - num(r.listFee) - num(r.shiire); }
+function staffTotal(s){ return (s.items||[]).reduce((a,i)=>a+num(i.amount),0); }
+function calcMonth(m){
+  const rows = (m.revenues||[]).filter(r => String(r.name||"").trim());
+  const expenseTotal = (m.expenses||[]).reduce((a,e)=>a+num(e.amount),0);
+  const staffSum = (m.staff||[]).reduce((a,s)=>a+staffTotal(s),0);
+  const keihiSum = expenseTotal + staffSum;                      // 当月経費社保合計
+  const kensu = num(m.params.kensu) || rows.length || 1;
+  const tanka = keihiSum / kensu;                                 // 当月経費単価
+  let gross=0, jun=0, jigyobu=0;
+  rows.forEach(r => {
+    const g = rvGross(r);
+    const j = g - tanka;
+    gross += g; jun += j; jigyobu += j * num(r.ritsu);
+  });
+  const honsha = jun - jigyobu;                                   // ③
+  const bunpaiBase = jigyobu - num(m.reserve.deposit);            // ④ ＝ ② − 当月積立
+  return { rows, expenseTotal, staffSum, keihiSum, kensu, tanka, gross, jun, jigyobu, honsha, bunpaiBase };
+}
+function incenSummary(m){
+  const map = new Map();
+  (m.revenues||[]).forEach(r => {
+    if (!r.incenTo) return;
+    const v = rvGross(r) * num(r.incenPct) / 100;
+    const cur = map.get(r.incenTo) || { total:0, rows:[] };
+    cur.total += v; cur.rows.push({ name: r.name, v: v });
+    map.set(r.incenTo, cur);
+  });
+  return map;
+}
+
+/* ========== 描画 ========== */
+function m(){ return months[currentMonth]; }
+
+function renderTabs(){
+  const keys = Object.keys(months).sort();
+  const el = document.getElementById("monthTabs");
+  el.innerHTML = keys.map(k =>
+    `<button class="tab ${viewMode==="month" && k===currentMonth ? "on":""}" data-month="${k}" type="button">${esc(monthLabel(k))}</button>`).join("")
+    + `<button class="tab" id="addMonthTab" type="button">＋月追加</button>`
+    + `<button class="tab ${viewMode==="hoshu"?"on":""}" id="hoshuTab" type="button">保守契約一覧</button>`;
+}
+
+function renderAll(){
+  renderTabs();
+  document.getElementById("monthView").style.display = viewMode==="month" ? "" : "none";
+  document.getElementById("hoshuView").style.display = viewMode==="hoshu" ? "" : "none";
+  if (viewMode === "hoshu") { renderHoshu(); return; }
+  if (!m()) return;
+  renderKpi(); renderRevenue(); renderExpense(); renderStaff(); renderAlloc(); renderIncen();
+}
+
+function renderKpi(){
+  const c = calcMonth(m());
+  document.getElementById("kpiArea").innerHTML = `
+    <div class="kpi"><span>売上（入金予定額 合計）</span><strong>${yen((m().revenues||[]).reduce((a,r)=>a+num(r.nyukin),0))}</strong></div>
+    <div class="kpi"><span>粗利 合計</span><strong>${yenS(c.gross)}</strong></div>
+    <div class="kpi"><span>当月経費社保合計 ／ 単価(÷${c.kensu})</span><strong>${yen(c.keihiSum)}<small style="font-weight:400"> ／ ${yen(c.tanka)}</small></strong></div>
+    <div class="kpi hl"><span>①純利益 合計</span><strong>${yenS(c.jun)}</strong></div>
+    <div class="kpi hl"><span>②事業部純利益</span><strong>${yenS(c.jigyobu)}</strong></div>
+    <div class="kpi hl"><span>③本社純利益（①−②）</span><strong>${yenS(c.honsha)}</strong></div>`;
+}
+
+function renderRevenue(){
+  const md = m(); const c = calcMonth(md);
+  const staffNames = (md.staff||[]).map(s=>s.name).concat((md.alloc||[]).map(a=>a.name));
+  const names = Array.from(new Set(staffNames)).filter(Boolean);
+  const head = `<tr><th style="width:26px">No</th><th style="min-width:150px">会社名</th><th class="num">入金予定額(税抜)</th><th class="num">リスト元手数料</th><th class="num">仕入れ・部材費</th><th class="num">粗利</th><th class="num">純利益</th><th class="num" style="width:56px">配分率</th><th class="num">事業部総利益単価</th><th>リース審査</th><th>インセン先</th><th class="num" style="width:46px">%</th><th style="width:26px"></th></tr>`;
+  const body = (md.revenues||[]).map((r,i) => {
+    const g = rvGross(r), j = g - c.tanka, t = j * num(r.ritsu);
+    const filled = String(r.name||"").trim();
+    return `<tr>
+      <td class="num">${i+1}</td>
+      <td><input data-rv="${i}" data-f="name" value="${esc(r.name)}" /></td>
+      <td><input class="num" data-rv="${i}" data-f="nyukin" inputmode="numeric" value="${esc(r.nyukin)}" /></td>
+      <td><input class="num" data-rv="${i}" data-f="listFee" inputmode="numeric" value="${esc(r.listFee)}" /></td>
+      <td><input class="num" data-rv="${i}" data-f="shiire" inputmode="numeric" value="${esc(r.shiire)}" /></td>
+      <td class="calc">${filled?yenS(g):""}</td>
+      <td class="calc">${filled?yenS(j):""}</td>
+      <td><input class="num" data-rv="${i}" data-f="ritsu" inputmode="decimal" value="${esc(r.ritsu)}" /></td>
+      <td class="calc">${filled?yenS(t):""}</td>
+      <td><input data-rv="${i}" data-f="shinsa" value="${esc(r.shinsa)}" list="shinsaList" /></td>
+      <td><select data-rv="${i}" data-f="incenTo"><option value=""></option>${names.map(n=>`<option ${r.incenTo===n?"selected":""}>${esc(n)}</option>`).join("")}</select></td>
+      <td><input class="num" data-rv="${i}" data-f="incenPct" inputmode="numeric" value="${esc(r.incenPct)}" /></td>
+      <td><button class="del-btn" data-del-rv="${i}" type="button">✕</button></td>
+    </tr>`;
+  }).join("");
+  const total = `<tr class="total"><td></td><td>小計（${c.rows.length}件）</td>
+    <td class="num">${yen((md.revenues||[]).reduce((a,r)=>a+num(r.nyukin),0))}</td>
+    <td class="num">${yen((md.revenues||[]).reduce((a,r)=>a+num(r.listFee),0))}</td>
+    <td class="num">${yen((md.revenues||[]).reduce((a,r)=>a+num(r.shiire),0))}</td>
+    <td class="num">${yenS(c.gross)}</td><td class="num">${yenS(c.jun)}</td><td></td><td class="num">${yenS(c.jigyobu)}</td><td colspan="4"></td></tr>`;
+  document.getElementById("revenueTable").innerHTML = head + body + total
+    + `<datalist id="shinsaList"><option>可決</option><option>否決</option><option>審査中</option><option>現金</option></datalist>`;
+}
+
+function renderExpense(){
+  const md = m();
+  const head = `<tr><th style="width:26px">No</th><th style="min-width:160px">経費項目</th><th class="num" style="width:130px">金額</th><th style="min-width:180px">備考</th><th style="width:26px"></th></tr>`;
+  const body = (md.expenses||[]).map((e,i)=>`<tr>
+    <td class="num">${i+1}</td>
+    <td><input data-ex="${i}" data-f="name" value="${esc(e.name)}" /></td>
+    <td><input class="num" data-ex="${i}" data-f="amount" inputmode="numeric" value="${esc(e.amount)}" /></td>
+    <td><input data-ex="${i}" data-f="memo" value="${esc(e.memo)}" /></td>
+    <td><button class="del-btn" data-del-ex="${i}" type="button">✕</button></td></tr>`).join("");
+  const total = `<tr class="total"><td></td><td>④経費合計</td><td class="num">${yen((md.expenses||[]).reduce((a,e)=>a+num(e.amount),0))}</td><td colspan="2"></td></tr>`;
+  document.getElementById("expenseTable").innerHTML = head + body + total;
+}
+
+function renderStaff(){
+  const md = m();
+  document.getElementById("staffArea").innerHTML = (md.staff||[]).map((s,si)=>{
+    const rows = (s.items||[]).map((it,ii)=>`<tr>
+      <td><input data-st="${si}" data-item="${ii}" data-f="label" value="${esc(it.label)}" /></td>
+      <td><input class="num" data-st="${si}" data-item="${ii}" data-f="amount" inputmode="numeric" value="${esc(it.amount)}" /></td>
+      <td><input data-st="${si}" data-item="${ii}" data-f="memo" value="${esc(it.memo)}" /></td>
+      <td><button class="del-btn" data-del-item="${si}:${ii}" type="button">✕</button></td></tr>`).join("");
+    return `<div class="staff-card">
+      <h3><input style="border:none;font:inherit;font-weight:700;width:8em" data-staff-name="${si}" value="${esc(s.name)}" />
+        <span><button class="btn small" data-add-item="${si}" type="button">＋項目</button>
+        <button class="del-btn" data-del-staff="${si}" type="button">✕</button></span></h3>
+      <table class="grid"><tr><th>項目</th><th class="num" style="width:110px">金額</th><th>備考</th><th style="width:24px"></th></tr>${rows}
+      <tr class="total"><td>合計（経費算入）</td><td class="num">${yen(staffTotal(s))}</td><td colspan="2"></td></tr></table>
+    </div>`;
+  }).join("");
+}
+
+function renderAlloc(){
+  const md = m(); const c = calcMonth(md);
+  const w = num(md.reserve.withdraw);
+  const head = `<tr><th>分配対象</th><th class="num" style="width:70px">比率</th><th class="num">④×比率</th><th class="num">⑤引出×比率</th><th class="num">当月総支給（参考）</th><th style="width:26px"></th></tr>`;
+  const body = (md.alloc||[]).map((a,i)=>{
+    const base = c.bunpaiBase * num(a.rate);
+    const wd = w * num(a.rate);
+    return `<tr>
+      <td><input data-al="${i}" data-f="name" value="${esc(a.name)}" /></td>
+      <td><input class="num" data-al="${i}" data-f="rate" inputmode="decimal" value="${esc(a.rate)}" /></td>
+      <td class="calc">${yenS(base)}</td><td class="calc">${yenS(wd)}</td><td class="calc">${yenS(base+wd)}</td>
+      <td><button class="del-btn" data-del-al="${i}" type="button">✕</button></td></tr>`;
+  }).join("");
+  document.getElementById("allocTable").innerHTML =
+    `<tr><th colspan="6" style="text-align:left">④分配原資 ＝ ②事業部純利益 − 当月内部留保積立 ＝ <b>${yenS(c.bunpaiBase)}</b></th></tr>` + head + body
+    + `<tr><td colspan="6" style="border:none;padding-top:6px"><button class="btn small" id="addAllocBtn" type="button">＋分配対象を追加</button></td></tr>`;
+
+  document.getElementById("reserveTable").innerHTML = `
+    <tr><th>当月内部留保 積立額</th><th>累計内部留保額</th><th>⑤当月内部留保 引き出し額</th><th>内部留保引き出し 累計</th></tr>
+    <tr>
+      <td><input class="num" data-rs="deposit" inputmode="numeric" value="${esc(md.reserve.deposit)}" /></td>
+      <td><input class="num" data-rs="balance" inputmode="numeric" value="${esc(md.reserve.balance)}" /></td>
+      <td><input class="num" data-rs="withdraw" inputmode="numeric" value="${esc(md.reserve.withdraw)}" /></td>
+      <td><input class="num" data-rs="withdrawTotal" inputmode="numeric" value="${esc(md.reserve.withdrawTotal)}" /></td>
+    </tr>`;
+}
+
+function renderIncen(){
+  const map = incenSummary(m());
+  if (!map.size) { document.getElementById("incenTable").innerHTML = `<tr><td style="color:var(--sub);border:none">インセン先が設定された案件はありません。収益テーブルの「インセン先」で担当者を選ぶと集計されます。</td></tr>`; return; }
+  let html = `<tr><th>担当者</th><th>対象案件（粗利×%）</th><th class="num" style="width:140px">合計（次月支給の参考）</th></tr>`;
+  map.forEach((v,k)=>{
+    html += `<tr><td><b>${esc(k)}</b></td><td>${v.rows.map(r=>`${esc(r.name)}（${yenS(r.v)}）`).join("、 ")}</td><td class="num"><b>${yenS(v.total)}</b></td></tr>`;
+  });
+  document.getElementById("incenTable").innerHTML = html;
+}
+
+function renderHoshu(){
+  const head = `<tr><th style="width:26px">No</th><th>申込日</th><th>入金日①</th><th style="min-width:160px">顧客名</th><th>摘要</th><th class="num">月額保守料(税別)</th><th class="num">年額保守料(税別)</th><th style="min-width:140px">備考</th><th style="width:26px"></th></tr>`;
+  const body = (hoshu.rows||[]).map((r,i)=>`<tr>
+    <td class="num">${i+1}</td>
+    <td><input type="date" data-ho="${i}" data-f="appDate" value="${esc(r.appDate)}" /></td>
+    <td><input type="date" data-ho="${i}" data-f="payDate" value="${esc(r.payDate)}" /></td>
+    <td><input data-ho="${i}" data-f="name" value="${esc(r.name)}" /></td>
+    <td><input data-ho="${i}" data-f="tekiyo" value="${esc(r.tekiyo)}" list="tekiyoList" /></td>
+    <td><input class="num" data-ho="${i}" data-f="monthly" inputmode="numeric" value="${esc(r.monthly)}" /></td>
+    <td class="calc">${num(r.monthly)?yen(num(r.monthly)*12):""}</td>
+    <td><input data-ho="${i}" data-f="memo" value="${esc(r.memo)}" /></td>
+    <td><button class="del-btn" data-del-ho="${i}" type="button">✕</button></td></tr>`).join("");
+  const total = `<tr class="total"><td></td><td colspan="4">合計（${(hoshu.rows||[]).length}件）</td>
+    <td class="num">${yen((hoshu.rows||[]).reduce((a,r)=>a+num(r.monthly),0))}</td>
+    <td class="num">${yen((hoshu.rows||[]).reduce((a,r)=>a+num(r.monthly)*12,0))}</td><td colspan="2"></td></tr>`;
+  document.getElementById("hoshuTable").innerHTML = head + body + total
+    + `<datalist id="tekiyoList"><option>OA機器</option><option>HP</option></datalist>`;
+}
+
+/* ========== 保存・同期 ========== */
+function markDirty(docId){
+  dirtyDocs.add(docId);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ months, hoshu }));
+  setSaveState("同期待ち…");
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(flushSaves, 800);
+}
+async function flushSaves(){
+  if (!cloudReady || !db) { setSaveState("端末内保存（クラウド未接続）"); return; }
+  const targets = Array.from(dirtyDocs); dirtyDocs.clear();
+  try {
+    setSaveState("クラウド同期中…");
+    for (const id of targets) {
+      if (id === "hoshu") {
+        await db.doc(HOSHU_DOC).set({ rows: hoshu.rows, updatedAt: new Date().toISOString() });
+      } else if (months[id]) {
+        months[id].updatedAt = new Date().toISOString();
+        await db.collection(SALES_COLLECTION).doc(id).set(months[id]);
+      }
+    }
+    setSaveState("同期済み " + new Date().toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit"}));
+  } catch (e) {
+    console.error("save error", e);
+    targets.forEach(t=>dirtyDocs.add(t));
+    setSaveState("同期エラー / 端末内保存");
+  }
+}
+function setSaveState(t){ document.getElementById("saveState").textContent = t; }
+
+function isEditing(){
+  const a = document.activeElement;
+  return a && ["INPUT","SELECT","TEXTAREA"].includes(a.tagName);
+}
+
+async function loadCloud(){
+  const snap = await db.collection(SALES_COLLECTION).get();
+  snap.forEach(doc => { months[doc.id] = Object.assign(blankMonth(doc.id), doc.data()); });
+  const hs = await db.doc(HOSHU_DOC).get();
+  if (hs.exists) hoshu = Object.assign({ rows: [] }, hs.data());
+  db.collection(SALES_COLLECTION).onSnapshot(s => {
+    if (isEditing()) return;
+    let changed = false;
+    s.forEach(doc => {
+      const local = months[doc.id];
+      const remote = doc.data();
+      if (!local || (remote.updatedAt||"") > (local.updatedAt||"")) { months[doc.id] = Object.assign(blankMonth(doc.id), remote); changed = true; }
+    });
+    if (changed) { if (!months[currentMonth]) currentMonth = Object.keys(months).sort().pop(); renderAll(); }
+  });
+}
+
+/* ========== 受注顧客管理から取り込み ========== */
+function ledgerBaseAmount(f, purchase){
+  const p = purchase || {};
+  if (p.method === "現金販売") return num(p.baseAmount);
+  const monthly = num(p.monthly), rate = num(p.rate);
+  if (monthly && rate) return Math.floor(monthly/(rate/100)/100)*100;
+  return num(p.baseAmount);
+}
+let importCandidates = [];
+async function openImport(){
+  document.getElementById("importModal").classList.add("open");
+  await refreshImport();
+}
+async function refreshImport(){
+  const listEl = document.getElementById("importList");
+  listEl.innerHTML = `<div class="note">読み込み中…</div>`;
+  try {
+    const basis = document.getElementById("importBasis").value;
+    const ym = monthToYm(currentMonth);
+    const snap = await db.collection(LEDGER_COLLECTION).get();
+    const existing = new Set((m().revenues||[]).map(r=>String(r.name||"").trim()).filter(Boolean));
+    importCandidates = [];
+    snap.forEach(doc => {
+      const d = doc.data() || {};
+      const f = d.fields || {};
+      const st = f.progressStatus || "";
+      if (st === "与信NG" || st === "失注") return;
+      const dateV = String(f[basis]||"");
+      if (dateV.slice(0,7) !== ym) return;
+      const shiire = (d.items||[]).reduce((a,it)=>a+num(it.qty)*num(it.unitCost),0);
+      const nyukin = ledgerBaseAmount(f, d.purchase);
+      importCandidates.push({ name: f.customerName || d.sheetName || "", nyukin, shiire, status: st, date: dateV, exists: existing.has(String(f.customerName||d.sheetName||"").trim()) });
+    });
+    document.getElementById("importNote").textContent = `${monthLabel(currentMonth)}（${ym}）の案件: ${importCandidates.length}件`;
+    listEl.innerHTML = importCandidates.length ? importCandidates.map((c,i)=>`
+      <label class="imp-row ${c.exists?"exists":""}"><input type="checkbox" data-imp="${i}" ${c.exists?"":"checked"} />
+        <span><b>${esc(c.name)}</b>${c.exists?"（既に収益にあります）":""}<br>
+        <span class="sub">入金予定額 ${yen(c.nyukin)} ／ 仕入れ ${yen(c.shiire)} ／ ${esc(c.status)} ／ ${esc(c.date)}</span></span></label>`).join("")
+      : `<div class="note">該当する案件がありません。基準日を変えてみてください。</div>`;
+  } catch (e) {
+    listEl.innerHTML = `<div class="note" style="color:var(--bad)">読み込みに失敗しました: ${esc(e.message)}</div>`;
+  }
+}
+function runImport(){
+  const md = m();
+  document.querySelectorAll("#importList [data-imp]").forEach(cb => {
+    if (!cb.checked) return;
+    const c = importCandidates[Number(cb.dataset.imp)];
+    if (!c) return;
+    const row = blankRevenue(md);
+    row.name = c.name; row.nyukin = c.nyukin; row.shiire = c.shiire;
+    row.shinsa = "可決";
+    md.revenues.push(row);
+  });
+  document.getElementById("importModal").classList.remove("open");
+  markDirty(currentMonth); renderAll();
+}
+
+/* ========== イベント ========== */
+document.addEventListener("click", ev => {
+  const t = ev.target;
+  const tab = t.closest(".tab");
+  if (tab) {
+    if (tab.id === "addMonthTab") { addMonth(); return; }
+    if (tab.id === "hoshuTab") { viewMode = "hoshu"; renderAll(); return; }
+    if (tab.dataset.month) { viewMode = "month"; currentMonth = tab.dataset.month; renderAll(); return; }
+  }
+  if (t.id === "addRevenueBtn") { m().revenues.push(blankRevenue(m())); markDirty(currentMonth); renderAll(); }
+  if (t.id === "addExpenseBtn") { m().expenses.push({name:"",amount:"",memo:""}); markDirty(currentMonth); renderAll(); }
+  if (t.id === "addStaffBtn") { m().staff.push({name:"新担当", items:[{label:"健康保険会社負担分",amount:0,memo:""},{label:"厚生年金会社負担分",amount:0,memo:""},{label:"労働保険会社負担分",amount:0,memo:""}]}); markDirty(currentMonth); renderAll(); }
+  if (t.id === "addAllocBtn") { m().alloc.push({name:"",rate:0}); markDirty(currentMonth); renderAll(); }
+  if (t.id === "addHoshuBtn") { hoshu.rows.push({appDate:"",payDate:"",name:"",tekiyo:"",monthly:"",memo:""}); markDirty("hoshu"); renderAll(); }
+  if (t.dataset.addItem !== undefined) { m().staff[Number(t.dataset.addItem)].items.push({label:"",amount:"",memo:""}); markDirty(currentMonth); renderAll(); }
+  if (t.dataset.delRv !== undefined && confirm("この収益行を削除しますか？")) { m().revenues.splice(Number(t.dataset.delRv),1); markDirty(currentMonth); renderAll(); }
+  if (t.dataset.delEx !== undefined && confirm("この経費行を削除しますか？")) { m().expenses.splice(Number(t.dataset.delEx),1); markDirty(currentMonth); renderAll(); }
+  if (t.dataset.delAl !== undefined) { m().alloc.splice(Number(t.dataset.delAl),1); markDirty(currentMonth); renderAll(); }
+  if (t.dataset.delHo !== undefined && confirm("この保守契約行を削除しますか？")) { hoshu.rows.splice(Number(t.dataset.delHo),1); markDirty("hoshu"); renderAll(); }
+  if (t.dataset.delStaff !== undefined && confirm("この担当者ブロックを削除しますか？")) { m().staff.splice(Number(t.dataset.delStaff),1); markDirty(currentMonth); renderAll(); }
+  if (t.dataset.delItem !== undefined) { const [si,ii]=t.dataset.delItem.split(":").map(Number); m().staff[si].items.splice(ii,1); markDirty(currentMonth); renderAll(); }
+  if (t.id === "importBtn") openImport();
+  if (t.id === "importCloseBtn") document.getElementById("importModal").classList.remove("open");
+  if (t.id === "importRunBtn") runImport();
+  if (t.id === "settingsBtn") openSettings();
+  if (t.id === "settingsCloseBtn") document.getElementById("settingsModal").classList.remove("open");
+  if (t.id === "settingsSaveBtn") saveSettings();
+  if (t.id === "logoutBtn") auth && auth.signOut();
+  if (t.id === "loginBtn") doLogin();
+});
+document.addEventListener("change", ev => {
+  if (ev.target.id === "importBasis") refreshImport();
+});
+document.addEventListener("input", ev => {
+  const t = ev.target;
+  const md = m();
+  if (!md && !t.dataset.ho) return;
+  if (t.dataset.rv !== undefined) { md.revenues[Number(t.dataset.rv)][t.dataset.f] = t.value; markDirty(currentMonth); refreshCalcOnly(); }
+  else if (t.dataset.ex !== undefined) { md.expenses[Number(t.dataset.ex)][t.dataset.f] = t.value; markDirty(currentMonth); refreshCalcOnly(); }
+  else if (t.dataset.st !== undefined) { md.staff[Number(t.dataset.st)].items[Number(t.dataset.item)][t.dataset.f] = t.value; markDirty(currentMonth); refreshCalcOnly(); }
+  else if (t.dataset.staffName !== undefined) { md.staff[Number(t.dataset.staffName)].name = t.value; markDirty(currentMonth); }
+  else if (t.dataset.al !== undefined) { md.alloc[Number(t.dataset.al)][t.dataset.f] = t.value; markDirty(currentMonth); refreshCalcOnly(); }
+  else if (t.dataset.rs !== undefined) { md.reserve[t.dataset.rs] = t.value; markDirty(currentMonth); refreshCalcOnly(); }
+  else if (t.dataset.ho !== undefined) { hoshu.rows[Number(t.dataset.ho)][t.dataset.f] = t.value; markDirty("hoshu"); }
+});
+// 入力中はフォーカスを壊さないよう、blur時に全再描画
+document.addEventListener("focusout", () => { setTimeout(() => { if (!isEditing()) renderAll(); }, 50); });
+function refreshCalcOnly(){ renderKpi(); }
+
+function addMonth(){
+  const def = nowKey();
+  const key = prompt("追加する月（YYMM形式。例: " + def + "）", def);
+  if (!key || !/^\d{4}$/.test(key)) return;
+  if (months[key]) { alert("その月は既にあります"); currentMonth = key; renderAll(); return; }
+  const prevKeys = Object.keys(months).sort();
+  const prev = prevKeys.length ? months[prevKeys[prevKeys.length-1]] : null;
+  const nm = blankMonth(key);
+  if (prev) {  // 前月から 経費項目・担当者構成・分配比率・パラメータを引き継ぐ（金額は経費のみ引き継ぎ）
+    nm.params = JSON.parse(JSON.stringify(prev.params));
+    nm.expenses = prev.expenses.map(e=>({name:e.name,amount:e.amount,memo:e.memo}));
+    nm.staff = prev.staff.map(s=>({name:s.name, items:s.items.map(i=>({label:i.label,amount:0,memo:i.memo}))}));
+    nm.alloc = JSON.parse(JSON.stringify(prev.alloc));
+    nm.reserve = { deposit: 0, balance: prev.reserve.balance, withdraw: 0, withdrawTotal: prev.reserve.withdrawTotal };
+  }
+  months[key] = nm; currentMonth = key; viewMode = "month";
+  markDirty(key); renderAll();
+}
+
+function openSettings(){
+  const p = m().params;
+  document.getElementById("setBunpai").value = p.bunpai;
+  document.getElementById("setKensu").value = p.kensu ?? "";
+  document.getElementById("setIncen").value = p.incenPct;
+  document.getElementById("settingsModal").classList.add("open");
+}
+function saveSettings(){
+  const p = m().params;
+  p.bunpai = num(document.getElementById("setBunpai").value) || 0.66;
+  const k = document.getElementById("setKensu").value;
+  p.kensu = k === "" ? null : num(k);
+  p.incenPct = num(document.getElementById("setIncen").value) || 10;
+  document.getElementById("settingsModal").classList.remove("open");
+  markDirty(currentMonth); renderAll();
+}
+
+/* ========== 認証 ========== */
+async function doLogin(){
+  const email = document.getElementById("loginEmail").value.trim();
+  const pass = document.getElementById("loginPassword").value;
+  const err = document.getElementById("loginError");
+  err.textContent = "";
+  if (!ALLOWED_EMAILS.includes(email.toLowerCase())) { err.textContent = "このメールアドレスは許可されていません"; return; }
+  try { await auth.signInWithEmailAndPassword(email, pass); }
+  catch (e) { err.textContent = "ログインに失敗しました: " + (e.code || e.message); }
+}
+
+async function boot(){
+  firebase.initializeApp(FIREBASE_CONFIG);
+  auth = firebase.auth();
+  db = firebase.firestore();
+  auth.onAuthStateChanged(async user => {
+    if (user && ALLOWED_EMAILS.includes(String(user.email||"").toLowerCase())) {
+      currentUser = user; cloudReady = true;
+      document.getElementById("loginOverlay").style.display = "none";
+      document.getElementById("app").style.display = "";
+      setSaveState("クラウド接続中…");
+      try {
+        const cached = localStorage.getItem(STORAGE_KEY);
+        if (cached) { const c = JSON.parse(cached); months = c.months||{}; hoshu = c.hoshu||{rows:[]}; }
+        await loadCloud();
+        if (!Object.keys(months).length) { const k = nowKey(); months[k] = blankMonth(k); }
+        currentMonth = Object.keys(months).sort().pop();
+        setSaveState("同期済み");
+      } catch (e) {
+        console.error(e);
+        setSaveState("クラウド読込エラー / 端末内データで表示");
+        if (!Object.keys(months).length) { const k = nowKey(); months[k] = blankMonth(k); }
+        currentMonth = Object.keys(months).sort().pop();
+      }
+      renderAll();
+    } else {
+      if (user) auth.signOut();
+      currentUser = null; cloudReady = false;
+      document.getElementById("loginOverlay").style.display = "flex";
+      document.getElementById("app").style.display = "none";
+    }
+  });
+  document.getElementById("loginPassword").addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
+}
+boot();
+</script>
+</body>
+</html>
