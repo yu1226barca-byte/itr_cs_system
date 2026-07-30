@@ -271,6 +271,17 @@ function blankMonth(key){
 }
 // 配分率は案件ごとに手入力（初期値は空欄）
 function blankRevenue(m){ return { name:"", nyukin:"", listFee:"", shiire:"", ritsu: "", shinsa:"", incenTo:"", incenPct: m.params.incenPct }; }
+
+// 旧バージョンで保存されたデータに欠けているフィールドを補完する
+// （localStorageキャッシュ・Firestoreどちらから読んでも必ずこの形に揃える）
+function normalizeMonth(id, data){
+  const md = Object.assign(blankMonth(id), data || {});
+  md.params = Object.assign({ bunpai: 0.66, kensu: null, incenPct: 10 }, md.params || {});
+  md.reserve = Object.assign({ deposit: 0, balance: 0, withdraw: 0, withdrawTotal: 0 }, md.reserve || {});
+  ["revenues","expenses","staff","alloc","buai"].forEach(k => { if (!Array.isArray(md[k])) md[k] = []; });
+  if (!md.payrollBase || typeof md.payrollBase !== "object") md.payrollBase = {};
+  return md;
+}
 // 工事・保守歩合の単価（内容を選ぶと自動セット。金額は編集可）
 const BUAI_PRICES = { "工事": 30000, "保守": 5000, "リモート": 1000 };
 
@@ -547,16 +558,17 @@ function isEditing(){
 
 async function loadCloud(){
   const snap = await db.collection(SALES_COLLECTION).get();
-  snap.forEach(doc => { months[doc.id] = Object.assign(blankMonth(doc.id), doc.data()); });
+  snap.forEach(doc => { months[doc.id] = normalizeMonth(doc.id, doc.data()); });
   const hs = await db.doc(HOSHU_DOC).get();
   if (hs.exists) hoshu = Object.assign({ rows: [] }, hs.data());
+  if (!Array.isArray(hoshu.rows)) hoshu.rows = [];
   db.collection(SALES_COLLECTION).onSnapshot(s => {
     if (isEditing()) return;
     let changed = false;
     s.forEach(doc => {
       const local = months[doc.id];
       const remote = doc.data();
-      if (!local || (remote.updatedAt||"") > (local.updatedAt||"")) { months[doc.id] = Object.assign(blankMonth(doc.id), remote); changed = true; }
+      if (!local || (remote.updatedAt||"") > (local.updatedAt||"")) { months[doc.id] = normalizeMonth(doc.id, remote); changed = true; }
     });
     if (changed) { if (!months[currentMonth]) currentMonth = Object.keys(months).sort().pop(); renderAll(); }
   });
@@ -634,7 +646,7 @@ document.addEventListener("click", ev => {
   if (t.id === "addStaffBtn") { m().staff.push({name:"新担当", items:[{label:"健康保険会社負担分",amount:0,memo:""},{label:"厚生年金会社負担分",amount:0,memo:""},{label:"労働保険会社負担分",amount:0,memo:""}]}); markDirty(currentMonth); renderAll(); }
   if (t.id === "addAllocBtn") { m().alloc.push({name:"",rate:0}); markDirty(currentMonth); renderAll(); }
   if (t.id === "addHoshuBtn") { hoshu.rows.push({appDate:"",payDate:"",name:"",tekiyo:"",monthly:"",memo:""}); markDirty("hoshu"); renderAll(); }
-  if (t.id === "addBuaiBtn") { m().buai.push({date:"",cust:"",type:"",amount:"",tanto:"大坪"}); markDirty(currentMonth); renderAll(); }
+  if (t.id === "addBuaiBtn") { const md=m(); if(!Array.isArray(md.buai)) md.buai=[]; md.buai.push({date:"",cust:"",type:"",amount:"",tanto:"大坪"}); markDirty(currentMonth); renderAll(); }
   if (t.dataset.delBu !== undefined && confirm("この歩合行を削除しますか？")) { m().buai.splice(Number(t.dataset.delBu),1); markDirty(currentMonth); renderAll(); }
   if (t.dataset.addItem !== undefined) { m().staff[Number(t.dataset.addItem)].items.push({label:"",amount:"",memo:""}); markDirty(currentMonth); renderAll(); }
   if (t.dataset.delRv !== undefined && confirm("この収益行を削除しますか？")) { m().revenues.splice(Number(t.dataset.delRv),1); markDirty(currentMonth); renderAll(); }
@@ -744,7 +756,13 @@ async function boot(){
       setSaveState("クラウド接続中…");
       try {
         const cached = localStorage.getItem(STORAGE_KEY);
-        if (cached) { const c = JSON.parse(cached); months = c.months||{}; hoshu = c.hoshu||{rows:[]}; }
+        if (cached) {
+          const c = JSON.parse(cached);
+          months = {};
+          Object.keys(c.months||{}).forEach(k => { months[k] = normalizeMonth(k, c.months[k]); });
+          hoshu = c.hoshu||{rows:[]};
+          if (!Array.isArray(hoshu.rows)) hoshu.rows = [];
+        }
         await loadCloud();
         if (!Object.keys(months).length) { const k = nowKey(); months[k] = blankMonth(k); }
         currentMonth = Object.keys(months).sort().pop();
