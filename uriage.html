@@ -539,15 +539,21 @@ async function flushSaves(){
       if (id === "hoshu") {
         await db.doc(HOSHU_DOC).set({ rows: hoshu.rows, updatedAt: new Date().toISOString() });
       } else if (months[id]) {
+        // シート由来の歩合行はリモートが正。保存直前に最新版へ差し替え、
+        // 古いローカルコピーで同期分を消してしまわないようにする
+        if (latestSheetBuai[id]) {
+          months[id].buai = (months[id].buai || []).filter(r => !(r && r.src === "sheet")).concat(latestSheetBuai[id]);
+        }
         months[id].updatedAt = new Date().toISOString();
         await db.collection(SALES_COLLECTION).doc(id).set(months[id]);
       }
     }
+    clearCloudError();
     setSaveState("同期済み " + new Date().toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit"}));
   } catch (e) {
     console.error("save error", e);
     targets.forEach(t=>dirtyDocs.add(t));
-    setSaveState("同期エラー / 端末内保存");
+    showCloudError("クラウドへの保存に失敗しました（" + (e.code || e.message) + "）");
   }
 }
 function setSaveState(t){ document.getElementById("saveState").textContent = t; }
@@ -564,15 +570,56 @@ async function loadCloud(){
   if (hs.exists) hoshu = Object.assign({ rows: [] }, hs.data());
   if (!Array.isArray(hoshu.rows)) hoshu.rows = [];
   db.collection(SALES_COLLECTION).onSnapshot(s => {
-    if (isEditing()) return;
-    let changed = false;
-    s.forEach(doc => {
-      const local = months[doc.id];
-      const remote = doc.data();
-      if (!local || (remote.updatedAt||"") > (local.updatedAt||"")) { months[doc.id] = normalizeMonth(doc.id, remote); changed = true; }
+    const docs = [];
+    s.forEach(doc => docs.push({ id: doc.id, data: doc.data() }));
+    // シート由来の歩合行は編集中でも常に控えておく（保存時の消失防止に使う）
+    docs.forEach(x => {
+      if (Array.isArray(x.data.buai)) latestSheetBuai[x.id] = x.data.buai.filter(r => r && r.src === "sheet");
     });
-    if (changed) { if (!months[currentMonth]) currentMonth = Object.keys(months).sort().pop(); renderAll(); }
+    if (isEditing()) { pendingDocs = docs; return; }  // 入力が終わったら focusout で適用
+    applyRemoteDocs_(docs);
+  }, err => {
+    // 読み取りが拒否されると従来は無言で失敗していたため、必ず画面に出す
+    console.error("Firestore listen error:", err);
+    showCloudError("リアルタイム同期に失敗しました（" + (err.code || err.message) + "）");
   });
+}
+
+// クラウド関連の失敗を目立つ形で知らせる
+function showCloudError(msg){
+  setSaveState("⚠ " + msg);
+  const el = document.getElementById("saveState");
+  if (el) el.style.color = "#b91c1c";
+  let banner = document.getElementById("cloudErrorBanner");
+  if (!banner) {
+    banner = document.createElement("div");
+    banner.id = "cloudErrorBanner";
+    banner.className = "card";
+    banner.style.cssText = "border-color:#fca5a5;background:#fef2f2;color:#7f1d1d";
+    const app = document.getElementById("app");
+    app.insertBefore(banner, app.children[1]);
+  }
+  banner.innerHTML = `<b>⚠ クラウド接続の問題</b><div style="font-size:12px;margin-top:6px;line-height:1.7">${esc(msg)}<br>
+    permission-denied の場合、Firestoreのセキュリティルールで <code>monthly_sales_records</code> と <code>maintenance_contracts</code> の読み書きが許可されていない可能性があります。<br>
+    入力内容はこの端末に保存されているため失われません。</div>`;
+}
+function clearCloudError(){
+  const b = document.getElementById("cloudErrorBanner");
+  if (b) b.remove();
+  const el = document.getElementById("saveState");
+  if (el) el.style.color = "";
+}
+
+let pendingDocs = null;       // 編集中に受け取った未適用のリアルタイム更新
+let latestSheetBuai = {};     // 月ごとの最新シート由来歩合行（リモートが正）
+
+function applyRemoteDocs_(docs){
+  let changed = false;
+  docs.forEach(x => {
+    const local = months[x.id];
+    if (!local || (x.data.updatedAt||"") > (local.updatedAt||"")) { months[x.id] = normalizeMonth(x.id, x.data); changed = true; }
+  });
+  if (changed) { if (!months[currentMonth]) currentMonth = Object.keys(months).sort().pop(); renderAll(); }
 }
 
 /* ========== 受注顧客管理から取り込み ========== */
@@ -696,8 +743,16 @@ document.addEventListener("input", ev => {
   else if (t.dataset.pay !== undefined) { md.payrollBase = md.payrollBase || {}; md.payrollBase[t.dataset.pay] = t.value; markDirty(currentMonth); }
   else if (t.dataset.ho !== undefined) { hoshu.rows[Number(t.dataset.ho)][t.dataset.f] = t.value; markDirty("hoshu"); }
 });
-// 入力中はフォーカスを壊さないよう、blur時に全再描画
-document.addEventListener("focusout", () => { setTimeout(() => { if (!isEditing()) renderAll(); }, 50); });
+// 入力中はフォーカスを壊さないよう、blur時に全再描画（保留中のリアルタイム更新もここで適用）
+document.addEventListener("focusout", () => { setTimeout(() => {
+  if (isEditing()) return;
+  if (pendingDocs) { const d = pendingDocs; pendingDocs = null; applyRemoteDocs_(d); }
+  renderAll();
+}, 50); });
+// 保険: focusoutを取りこぼしても、手が空いていれば数秒以内に保留分を適用する
+setInterval(() => {
+  if (pendingDocs && !isEditing()) { const d = pendingDocs; pendingDocs = null; applyRemoteDocs_(d); }
+}, 3000);
 function refreshCalcOnly(){ renderKpi(); }
 
 function addMonth(){
@@ -770,7 +825,7 @@ async function boot(){
         setSaveState("同期済み");
       } catch (e) {
         console.error(e);
-        setSaveState("クラウド読込エラー / 端末内データで表示");
+        showCloudError("クラウドからの読み込みに失敗しました（" + (e.code || e.message) + "）");
         if (!Object.keys(months).length) { const k = nowKey(); months[k] = blankMonth(k); }
         currentMonth = Object.keys(months).sort().pop();
       }
