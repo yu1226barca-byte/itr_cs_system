@@ -2376,6 +2376,28 @@
         line-height: 1.25 !important;
       }
 
+      /* PC表示用の列幅指定（.items-table td:nth-child(N){width:6%!important}）は
+         詳細度が高くカード表示の width:100% に勝ってしまい、スマホで入力欄が
+         数pxに潰れていた。同じ詳細度で打ち消す。 */
+      .items-table td:nth-child(1),
+      .items-table td:nth-child(2),
+      .items-table td:nth-child(3),
+      .items-table td:nth-child(4),
+      .items-table td:nth-child(5),
+      .items-table td:nth-child(6),
+      .items-table td:nth-child(7),
+      .items-table td:nth-child(8),
+      .items-table td:nth-child(9),
+      .items-table td:nth-child(10),
+      .items-table td:nth-child(11),
+      .items-table td:nth-child(12),
+      .items-table td:nth-child(13) {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        overflow: visible !important;
+      }
+
       .items-table td:nth-child(1)::before { content: "種別"; }
       .items-table td:nth-child(2)::before { content: "商材"; }
       .items-table td:nth-child(3)::before { content: "メーカー/外注先"; }
