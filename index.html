@@ -3254,6 +3254,15 @@
     .search-hit-fields span { display: inline-block; margin-right: 12px; }
     .search-empty { padding: 20px 18px; text-align: center; color: #94a3b8; font-size: 13px; }
 
+    /* ★商流別・リース会社別の内訳テーブル */
+    .breakdown-wrap { max-height: 168px; overflow-y: auto; }
+    .breakdown-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .breakdown-table th, .breakdown-table td { padding: 5px 6px; border-bottom: 1px solid rgba(148, 163, 184, .25); white-space: nowrap; }
+    .breakdown-table th { text-align: left; font-weight: 700; opacity: .7; }
+    .breakdown-table td.num, .breakdown-table th.num { text-align: right; }
+    .breakdown-table tr.total-row td { font-weight: 700; border-top: 1px solid rgba(148, 163, 184, .5); border-bottom: none; }
+    .breakdown-empty { font-size: 12px; opacity: .6; padding: 10px 4px; }
+
     /* ★納品書：印字する物品の選択 */
     #deliveryItemModal .modal-card { width: min(680px, 96vw); }
     #deliveryItemModal .modal-body { padding: 0; }
@@ -3312,6 +3321,10 @@
         <div class="metric"><span>検収OK</span><strong id="metricDone">0</strong></div>
         <div class="metric"><span>未完了・要対応</span><strong id="metricPending">0</strong></div>
         <div class="metric"><span>粗利合計</span><strong id="metricGross">¥0</strong></div>
+        <div class="metric" title="粗利合計 ÷ 有効案件数（与信NG・粗利0の案件は除く）"><span>平均粗利 / 件</span><strong id="metricGrossAvg">¥0</strong></div>
+        <div class="metric" title="粗利合計 ÷ 総額合計"><span>粗利率</span><strong id="metricGrossRate">-</strong></div>
+        <div class="metric" title="与信OK以降の件数 ÷（与信OK以降＋与信NG）"><span>与信通過率</span><strong id="metricApprovalRate">-</strong></div>
+        <div class="metric" title="申込日から検収日までの平均日数（両方入力済みの案件のみ）"><span>平均リードタイム</span><strong id="metricLeadTime">-</strong></div>
       </div>
       <div class="chart-grid">
         <div class="chart-card">
@@ -3327,6 +3340,20 @@
             <div class="chart-note" id="yearlyChartNote">年別</div>
           </div>
           <canvas id="yearlyChart" width="520" height="150"></canvas>
+        </div>
+        <div class="chart-card">
+          <div class="chart-head">
+            <div class="chart-title">商流（担当者）別 実績</div>
+            <div class="chart-note">件数・粗利・平均粗利</div>
+          </div>
+          <div class="breakdown-wrap"><table class="breakdown-table" id="routeBreakdown"></table></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-head">
+            <div class="chart-title">リース会社別 実績</div>
+            <div class="chart-note">件数・粗利・平均粗利</div>
+          </div>
+          <div class="breakdown-wrap"><table class="breakdown-table" id="leaseBreakdown"></table></div>
         </div>
       </div>
     </section>
@@ -3666,7 +3693,7 @@
     const OPTIONS = {
       routes: ["【吉本】通常アポ","【大坪】通常アポ","【水口】通常アポ","【土肥】通常アポ","【吉本】紹介アポ","【大坪】紹介アポ","【水口】紹介アポ","【土肥】紹介アポ","【新嶋社長顧客アポ】","【中島専務顧客アポ】"],
       leaseCompanies: ["アプラス","NTT・TC","三井住友","クレディセゾン","シャープ","BP","現金販売"],
-      progress: ["与信待ち","与信OK（発注待ち）","与信OK（発注済み納品待ち）","与信OK（納品済み工事待ち）","工事完了（検収待ち）","工事完了（検収OK）","書類不備"],
+      progress: ["与信待ち","与信NG","与信OK（発注待ち）","与信OK（発注済み納品待ち）","与信OK（納品済み工事待ち）","工事完了（検収待ち）","工事完了（検収OK）","書類不備"],
       types: ["販売品","サービス品","部材費","外注費","応援費","返金"],
       purchaseMethods: ["リース","現金販売"],
       times: ["120回","96回","84回","72回","60回","48回","36回"],
@@ -4401,13 +4428,87 @@
       filter.innerHTML = `<option value="">全ステータス</option>` + OPTIONS.progress.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join("");
     }
 
+    // 与信NG・失注は「受注に至らなかった案件」として実績集計から除く
+    const LOST_STATUSES = ["与信NG", "失注"];
+    function isLostRecord(record) {
+      return LOST_STATUSES.indexOf((record.fields || {}).progressStatus || "") !== -1;
+    }
+    // 実績としてカウントする案件（受注に至り、金額が入っているもの）
+    function isDealRecord(record) {
+      return !isLostRecord(record) && calcGross(record) !== 0;
+    }
+
     function renderMetrics() {
       const totalGross = records.reduce((sum, r) => sum + calcGross(r), 0);
+      const deals = records.filter(isDealRecord);
+      const totalBase = deals.reduce((sum, r) => sum + calcBaseAmount(r), 0);
+      const dealGross = deals.reduce((sum, r) => sum + calcGross(r), 0);
+
       document.getElementById("metricCount").textContent = records.length;
       document.getElementById("metricDone").textContent = records.filter(r => r.fields.progressStatus === "工事完了（検収OK）").length;
       document.getElementById("metricPending").textContent = records.filter(r => r.fields.progressStatus !== "工事完了（検収OK）").length;
       document.getElementById("metricGross").textContent = yen(totalGross);
+
+      // 平均粗利／件
+      document.getElementById("metricGrossAvg").textContent =
+        deals.length ? yen(Math.round(dealGross / deals.length)) : "-";
+
+      // 粗利率
+      document.getElementById("metricGrossRate").textContent =
+        totalBase ? (dealGross / totalBase * 100).toFixed(1) + "%" : "-";
+
+      // 与信通過率（与信の結果が出ている案件のうち、通った割合）
+      const ng = records.filter(r => (r.fields.progressStatus || "") === "与信NG").length;
+      const passed = records.filter(r => {
+        const s = r.fields.progressStatus || "";
+        return s.indexOf("与信OK") === 0 || s.indexOf("工事完了") === 0 || s === "書類不備";
+      }).length;
+      document.getElementById("metricApprovalRate").textContent =
+        (passed + ng) ? (passed / (passed + ng) * 100).toFixed(0) + "%" : "-";
+
+      // 平均リードタイム（申込日→検収日）
+      const spans = [];
+      records.forEach(r => {
+        const a = normalizeDate(r.fields.applicationDate);
+        const b = normalizeDate(r.fields.inspectionDate);
+        if (!a || !b) return;
+        const d = (new Date(b) - new Date(a)) / 86400000;
+        if (Number.isFinite(d) && d >= 0) spans.push(d);
+      });
+      document.getElementById("metricLeadTime").textContent =
+        spans.length ? Math.round(spans.reduce((s, v) => s + v, 0) / spans.length) + "日" : "-";
+
+      renderBreakdown("routeBreakdown", "商流", r => r.fields.route || "(未設定)");
+      renderBreakdown("leaseBreakdown", "リース会社", r => r.fields.leaseCompany || "(未設定)");
       renderCharts();
+    }
+
+    // 指定のキーごとに 件数・粗利・平均粗利 を集計して表にする
+    function renderBreakdown(elementId, label, keyOf) {
+      const el = document.getElementById(elementId);
+      if (!el) return;
+      const map = new Map();
+      records.filter(isDealRecord).forEach(r => {
+        const k = keyOf(r);
+        const cur = map.get(k) || { count: 0, gross: 0 };
+        cur.count++;
+        cur.gross += calcGross(r);
+        map.set(k, cur);
+      });
+      if (!map.size) {
+        el.innerHTML = `<tr><td class="breakdown-empty">データがありません</td></tr>`;
+        return;
+      }
+      const rows = Array.from(map.entries()).sort((a, b) => b[1].gross - a[1].gross);
+      const totalCount = rows.reduce((s, x) => s + x[1].count, 0);
+      const totalGross = rows.reduce((s, x) => s + x[1].gross, 0);
+      el.innerHTML =
+        `<thead><tr><th>${esc(label)}</th><th class="num">件数</th><th class="num">粗利</th><th class="num">平均</th></tr></thead><tbody>` +
+        rows.map(([k, v]) =>
+          `<tr><td>${esc(k)}</td><td class="num">${v.count}</td><td class="num">${yen(v.gross)}</td><td class="num">${yen(Math.round(v.gross / v.count))}</td></tr>`
+        ).join("") +
+        `<tr class="total-row"><td>合計</td><td class="num">${totalCount}</td><td class="num">${yen(totalGross)}</td><td class="num">${totalCount ? yen(Math.round(totalGross / totalCount)) : "-"}</td></tr>` +
+        `</tbody>`;
     }
 
     function renderRecordSelect() {
