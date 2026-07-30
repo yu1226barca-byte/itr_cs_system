@@ -158,7 +158,7 @@
 
     <!-- 給与計算 -->
     <div class="card">
-      <h2>【アポインター・工事保守 給与計算（参考）】</h2>
+      <h2>【担当別当月インセンティブ計算（次月支給分）】</h2>
       <div class="table-scroll"><table class="grid" id="payrollTable"></table></div>
       <div class="note">支給合計 ＝ 固定給（手入力）＋ アポインセン（収益テーブルのインセン先×%を自動集計）＋ 工事・保守歩合（歩合明細を担当別に自動集計）。<b>参考値です。経費への算入は【担当者別】ブロックに入力してください</b>（Excel運用と同じ）。</div>
     </div>
@@ -281,6 +281,12 @@ function normalizeMonth(id, data){
   md.reserve = Object.assign({ deposit: 0, balance: 0, withdraw: 0, withdrawTotal: 0 }, md.reserve || {});
   ["revenues","expenses","staff","alloc","buai"].forEach(k => { if (!Array.isArray(md[k])) md[k] = []; });
   if (!md.payrollBase || typeof md.payrollBase !== "object") md.payrollBase = {};
+  // Excel移行データは経費項目名を label で持つため name に寄せる
+  md.expenses = md.expenses.map(e => {
+    const o = Object.assign({}, e);
+    if (!o.name && o.label) { o.name = o.label; delete o.label; }
+    return o;
+  });
   return md;
 }
 // 工事・保守歩合の単価（内容を選ぶと自動セット。金額は編集可）
