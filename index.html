@@ -2519,6 +2519,21 @@
         text-align: center !important;
       }
 
+      /* 明細テーブルと同様、PC用の列幅指定（td:nth-child(N){width:14%!important}）が
+         カード表示の width:100% に勝ってしまうため、同じ詳細度で打ち消す */
+      .purchase-table td:nth-child(1),
+      .purchase-table td:nth-child(2),
+      .purchase-table td:nth-child(3),
+      .purchase-table td:nth-child(4),
+      .purchase-table td:nth-child(5),
+      .purchase-table td:nth-child(6),
+      .purchase-table td:nth-child(7) {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        overflow: visible !important;
+      }
+
       .purchase-table td:nth-child(1)::before { content: "購入方法"; }
       .purchase-table td:nth-child(2)::before { content: "リース会社"; }
       .purchase-table td:nth-child(3)::before { content: "月額（税別）"; }
