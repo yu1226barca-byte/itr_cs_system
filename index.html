@@ -3989,6 +3989,12 @@
             // クラウド未登録（新規）→ ドキュメント全体を書き込み
             batch.set(ref, {
               ...record,
+              fields: {
+                ...(record.fields || {}),
+                // 進捗ステータスに入った時刻。updatedAt はどんな編集でも更新されるため
+                // 「そのステータスで何日止まっているか」を表せない
+                statusChangedAt: (record.fields || {}).statusChangedAt || record.updatedAt
+              },
               sortIndex: index,
               updatedAtClient: record.updatedAt,
               updatedAtServer: firebase.firestore.FieldValue.serverTimestamp()
@@ -4003,6 +4009,13 @@
             if (record.sheetName !== prev.sheetName) patch.sheetName = record.sheetName;
             const curFields = record.fields || {};
             const prevFields = prev.fields || {};
+            // 進捗ステータスが変わった時だけ時刻を刻む。
+            // ローカルのrecordは書き換えずパッチにだけ足す（差分検知のハッシュを乱さないため）。
+            // 旧レコードには statusChangedAt が無いので、読む側は updatedAt にフォールバックすること
+            if (prevFields.progressStatus && curFields.progressStatus
+                && curFields.progressStatus !== prevFields.progressStatus) {
+              patch["fields.statusChangedAt"] = record.updatedAt;
+            }
             // fields.* を dot-path で個別更新（変わった項目のみ）
             Object.keys(curFields).forEach(k => {
               if (curFields[k] !== prevFields[k]) patch["fields." + k] = curFields[k];
