@@ -4464,12 +4464,32 @@
 
       document.body.classList.add("printing-delivery");
 
-      setTimeout(() => {
-        window.print();
-        setTimeout(() => {
-          document.body.classList.remove("printing-delivery");
-        }, 800);
-      }, 120);
+      // 後片付けを固定タイマーでやると、印刷プレビューの描画が終わる前に
+      // printing-delivery が外れ、CSSの display:none で納品書が消える。
+      // 1ページ目だけ描画済みで残り、弊社控えが出ない事故になっていたため、
+      // 実際に印刷が終わったイベントで片付ける
+      let cleaned = false;
+      const mql = window.matchMedia ? window.matchMedia("print") : null;
+      const onMediaChange = (e) => { if (!e.matches) cleanup(); };
+      function cleanup() {
+        if (cleaned) return;
+        cleaned = true;
+        document.body.classList.remove("printing-delivery");
+        window.removeEventListener("afterprint", cleanup);
+        if (mql && mql.removeEventListener) mql.removeEventListener("change", onMediaChange);
+      }
+      window.addEventListener("afterprint", cleanup);
+      // afterprint が飛ばない環境(一部のSafari等)向けのフォールバック
+      if (mql && mql.addEventListener) mql.addEventListener("change", onMediaChange);
+      // どちらも来なかった場合に印刷レイアウトのまま固まらないための保険
+      setTimeout(cleanup, 60000);
+
+      // 社判画像の読み込み前に印刷するとレイアウトが崩れるので待ってから呼ぶ
+      const imgs = Array.from(area.querySelectorAll("img"));
+      Promise.all(imgs.map(img => img.complete ? null : new Promise(res => {
+        img.addEventListener("load", res, { once: true });
+        img.addEventListener("error", res, { once: true });
+      }))).then(() => window.print());
     }
 
 
