@@ -5457,7 +5457,7 @@
       }
 
       function openLogModal(i) {
-        closeModal_();
+        closeModal_(true);
         const l = i >= 0 ? (K.logs[i] || {}) : { date: today(), type: "保守", status: "完了" };
         const el = buildModal_(`<div class="karte-modal-card">
           <div class="karte-modal-head">
@@ -5505,7 +5505,7 @@
       }
 
       function openDeviceModal(i) {
-        closeModal_();
+        closeModal_(true);
         const d = i >= 0 ? (K.devices[i] || {}) : {};
         const el = buildModal_(`<div class="karte-modal-card">
           <div class="karte-modal-head">
@@ -5531,16 +5531,37 @@
         document.body.appendChild(el);
       }
 
+      // 入力途中に背景をクリックしただけで内容が消える事故を防ぐため、
+      // 開いた時点の入力値を控えておき、変わっていれば閉じる前に確認する
+      let modalBaseline_ = null;
+
+      function modalValues_(el) {
+        return Array.from(el.querySelectorAll("input, textarea, select"))
+          .map(f => (f.type === "checkbox" || f.type === "radio")
+            ? (f.checked ? "1" : "0")
+            : String(f.value == null ? "" : f.value))
+          .join("\u0001");
+      }
+
       function buildModal_(inner) {
         const el = document.createElement("div");
         el.id = "karteModal";
         el.innerHTML = inner;
+        modalBaseline_ = modalValues_(el);
         el.addEventListener("click", e => { if (e.target.id === "karteModal") closeModal_(); });
         return el;
       }
-      function closeModal_() {
+
+      // force=true は保存・削除・別モーダルを開く直前など、こちら都合で閉じる場合。
+      // ユーザー操作(背景クリック・✕・キャンセル)では未保存なら確認する
+      function closeModal_(force) {
         const el = document.getElementById("karteModal");
-        if (el) el.remove();
+        if (!el) return;
+        if (!force && modalBaseline_ !== null && modalValues_(el) !== modalBaseline_) {
+          if (!confirm("入力内容がまだ保存されていません。\n閉じると入力した内容は失われます。閉じますか？")) return;
+        }
+        modalBaseline_ = null;
+        el.remove();
       }
 
       async function refresh() { await loadSub(); renderPanel(); }
@@ -5632,14 +5653,14 @@
               data.createdAt = nowStamp();
               await karteRef().collection("serviceLogs").add(data);
             }
-            closeModal_();
+            closeModal_(true);
             await refresh();
           } catch (e) { console.error(e); alert("保存に失敗しました: " + e.message); }
         },
 
         async delLog(i) {
           const l = K.logs[i]; if (!l || !confirm("この対応記録を削除しますか？")) return;
-          try { await karteRef().collection("serviceLogs").doc(l._id).delete(); closeModal_(); await refresh(); }
+          try { await karteRef().collection("serviceLogs").doc(l._id).delete(); closeModal_(true); await refresh(); }
           catch (e) { console.error(e); alert("削除に失敗しました: " + e.message); }
         },
 
@@ -5653,14 +5674,14 @@
             } else {
               await karteRef().collection("devices").add(data);
             }
-            closeModal_();
+            closeModal_(true);
             await refresh();
           } catch (e) { console.error(e); alert("保存に失敗しました: " + e.message); }
         },
 
         async delDevice(i) {
           const d = K.devices[i]; if (!d || !confirm(`機器「${d.name || ""}」を削除しますか？`)) return;
-          try { await karteRef().collection("devices").doc(d._id).delete(); closeModal_(); await refresh(); }
+          try { await karteRef().collection("devices").doc(d._id).delete(); closeModal_(true); await refresh(); }
           catch (e) { console.error(e); alert("削除に失敗しました: " + e.message); }
         }
       };
