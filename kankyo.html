@@ -3485,7 +3485,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
 
   <script>
-    const STORAGE_KEY = "excel_style_order_customer_master_v5";
+    const STORAGE_KEY = "excel_style_order_customer_master_env_v5";
     /*
       【Firestoreリアルタイム同期設定】
       Firebase Console → プロジェクト設定 → マイアプリ → SDK setup and configuration の firebaseConfig を
@@ -3502,7 +3502,7 @@
   measurementId: "G-DVV9HGK16T"
 };
 
-    const FIRESTORE_COLLECTION = "order_customer_records_kankyo";
+    const FIRESTORE_COLLECTION = "order_customer_records_env";
     const ALLOWED_EMAILS = ["yu1226barca@gmail.com"];
     let db = null;
     let cloudReady = false;
@@ -5246,16 +5246,16 @@
     initAuthGate();
 
     /* ================================================================
-       保守カルテ統合モジュール v4（karte_customers_kankyo）
-       - 既存の order_customer_records_kankyo / 同期ロジックには一切書き込まない
-       - カルテは別コレクション karte_customers_kankyo に保存（1ドキュメント=1顧客）
+       保守カルテ統合モジュール v4（karte_customers_env）
+       - 既存の order_customer_records_env / 同期ロジックには一切書き込まない
+       - カルテは別コレクション karte_customers_env に保存（1ドキュメント=1顧客）
        - 名寄せ: customerName 完全一致 → aliases（別名・表記ゆれ）配列で検索
        - v2: 対応履歴は一覧=要約表示、編集は詳細モーダル（長文対応）
        - v3: 構成図・資料パス欄（NASパス保存・コピー / URLは開く）
        - v4.2: モバイル対応・スマホUI拡大（狭い画面ではカード表示・!important強制適用）、機器編集もモーダル方式に統一
        ================================================================ */
     (function () {
-      const KARTE_COLLECTION = "karte_customers_kankyo";
+      const KARTE_COLLECTION = "karte_customers_env";
       // 構成図・資料の保管先（NAS）。カルテ新規作成時に「基点パス\屋号」を自動セット
       const DIAGRAM_BASE = "\\\\192.168.1.8\\share\\public_新\\■営業本部（営業）\\■水口■\\顧客";
       const LOG_TYPES = ["設置", "保守", "障害", "問合せ", "その他"];
