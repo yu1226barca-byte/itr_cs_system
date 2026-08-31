@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>2課合計ビュー｜受注台帳 集計（読み取り専用）</title>
+  <style>
+    :root {
+      --bg1: #030712; --bg2: #0a1420; --bg3: #0b1710;
+      --paper: rgba(12, 20, 33, .88);
+      --line: rgba(148, 163, 184, .22);
+      --ink: #eaf2ff; --muted: #93a4bd;
+      --gold: #fbbf24; --gold-soft: rgba(251, 191, 36, .14);
+      --ka1: #22d3ee; --ka1-soft: rgba(34, 211, 238, .14);
+      --ka2: #34d399; --ka2-soft: rgba(52, 211, 153, .14);
+      --red: #fb7185; --radius: 16px;
+      --shadow: 0 20px 60px rgba(0, 0, 0, .45);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; color: var(--ink); font-size: 14px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Kaku Gothic ProN", "Noto Sans JP", Meiryo, sans-serif;
+      background:
+        radial-gradient(circle at 8% 4%, rgba(251, 191, 36, .12), transparent 30%),
+        radial-gradient(circle at 92% 8%, rgba(52, 211, 153, .12), transparent 30%),
+        radial-gradient(circle at 50% 100%, rgba(34, 211, 238, .10), transparent 40%),
+        linear-gradient(135deg, var(--bg1) 0%, var(--bg2) 55%, var(--bg3) 100%);
+      background-attachment: fixed; min-height: 100vh;
+    }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 18px 16px 60px; }
+    .hero { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
+    h1 { font-size: 20px; margin: 0; letter-spacing: .02em; }
+    h1 .badge { font-size: 11px; font-weight: 700; color: #1a1205; background: var(--gold); padding: 2px 8px; border-radius: 999px; margin-left: 8px; vertical-align: middle; }
+    .subtitle { color: var(--muted); font-size: 12px; margin: 2px 0 0; }
+    .hero-right { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); }
+    .auth-logout { background: transparent; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; cursor: pointer; font-size: 12px; }
+    .updated { font-size: 11px; color: var(--muted); margin: 4px 0 16px; }
+    .updated b { color: var(--gold); }
+
+    .metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 18px; }
+    .metric { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; box-shadow: var(--shadow); }
+    .metric span { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+    .metric strong { font-size: 20px; font-weight: 800; letter-spacing: .01em; }
+    .metric.hi strong { color: var(--gold); }
+
+    .card { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px 16px; margin-bottom: 16px; }
+    .card > .card-title { font-size: 13px; font-weight: 700; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+    .card > .card-title .note { font-weight: 400; font-size: 11px; color: var(--muted); }
+
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+    th { color: var(--muted); font-weight: 600; font-size: 11px; }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .tbl-scroll { overflow-x: auto; }
+    tr.total-row td { font-weight: 800; color: var(--gold); border-top: 2px solid var(--line); border-bottom: none; }
+    .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+    .dot.k1 { background: var(--ka1); }
+    .dot.k2 { background: var(--ka2); }
+    .col-k1 { color: var(--ka1); }
+    .col-k2 { color: var(--ka2); }
+
+    .seg { display: inline-flex; background: rgba(2, 6, 23, .5); border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 2px; }
+    .seg button { background: transparent; border: none; color: var(--muted); padding: 5px 12px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 600; }
+    .seg button.active { background: var(--gold); color: #1a1205; }
+    .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
+    select { background: rgba(2, 6, 23, .5); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font-size: 12px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 720px) { .grid2 { grid-template-columns: 1fr; } h1 { font-size: 17px; } }
+    .breakdown-empty { color: var(--muted); text-align: center; padding: 14px; }
+
+    /* login gate */
+    .login-gate { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 20px;
+      background: radial-gradient(circle at 50% 20%, rgba(251,191,36,.10), transparent 40%), linear-gradient(135deg, #030712, #0a1420); }
+    body.auth-locked { overflow: hidden; }
+    body:not(.auth-locked) .login-gate { display: none; }
+    .login-card { width: 100%; max-width: 360px; background: var(--paper); border: 1px solid var(--line); border-radius: 20px; padding: 26px 22px; box-shadow: var(--shadow); }
+    .login-mark { font-size: 30px; text-align: center; }
+    .login-card h2 { text-align: center; font-size: 17px; margin: 8px 0 4px; }
+    .login-card p { text-align: center; color: var(--muted); font-size: 12px; margin: 0 0 16px; }
+    .login-form label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+    .login-form input { width: 100%; margin-top: 4px; padding: 9px 11px; border-radius: 9px; border: 1px solid var(--line); background: rgba(2,6,23,.5); color: var(--ink); font-size: 14px; }
+    .login-submit { width: 100%; margin-top: 6px; padding: 10px; border: none; border-radius: 9px; background: var(--gold); color: #1a1205; font-weight: 800; font-size: 14px; cursor: pointer; }
+    .login-error { color: var(--red); font-size: 12px; text-align: center; min-height: 16px; margin-top: 10px; }
+    .app-hidden { display: none; }
+    body.auth-locked .wrap { filter: blur(3px); pointer-events: none; }
+  </style>
+</head>
+<body class="auth-locked">
+  <!-- ===== ログイン ===== -->
+  <div class="login-gate" id="loginGate">
+    <div class="login-card">
+      <div class="login-mark">📊</div>
+      <h2>2課合計ビュー ログイン</h2>
+      <p>受注台帳の合計（読み取り専用）。許可されたメールのみ。</p>
+      <form id="loginForm" class="login-form">
+        <label>メールアドレス
+          <input id="loginEmail" type="email" autocomplete="email" placeholder="example@example.com" required />
+        </label>
+        <label>パスワード
+          <input id="loginPassword" type="password" autocomplete="current-password" placeholder="Password" required />
+        </label>
+        <button class="login-submit" type="submit">ログイン</button>
+      </form>
+      <div class="login-error" id="loginError"></div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="hero">
+      <div>
+        <h1>2課 合計ビュー<span class="badge">受注台帳ベース・読み取り専用</span></h1>
+        <p class="subtitle">
+          <span class="dot k1"></span>課1（既存）<span style="opacity:.5">＋</span>
+          <span class="dot k2"></span>課2（環境ソリューション課）を合算。編集は各課の台帳で行ってください。
+        </p>
+      </div>
+      <div class="hero-right">
+        <span id="authStatus">未ログイン</span>
+        <button class="auth-logout" id="logoutBtn" type="button">ログアウト</button>
+      </div>
+    </div>
+    <div class="updated" id="updatedLine">同期待ち…</div>
+
+    <!-- 合算ヘッドライン -->
+    <div class="metrics" id="metrics"></div>
+
+    <!-- 課別サマリ -->
+    <div class="card">
+      <div class="card-title">課別サマリ <span class="note">課ごとの内訳と合計</span></div>
+      <div class="tbl-scroll"><table id="kaSummary"></table></div>
+    </div>
+
+    <!-- 内訳（スコープ切替） -->
+    <div class="controls">
+      <div class="seg" id="scopeSeg">
+        <button data-scope="all" class="active">2課合算</button>
+        <button data-scope="1">課1のみ</button>
+        <button data-scope="2">課2のみ</button>
+      </div>
+      <label style="font-size:12px;color:var(--muted);">月次の基準日
+        <select id="basisDate">
+          <option value="applicationDate">申込日</option>
+          <option value="inspectionDate">検収日</option>
+          <option value="constructionDate">工事予定日</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="grid2">
+      <div class="card">
+        <div class="card-title">月次 受注件数・粗利 <span class="note" id="basisNote"></span></div>
+        <div class="tbl-scroll"><table id="monthlyBreakdown"></table></div>
+      </div>
+      <div class="card">
+        <div class="card-title">商流別 実績</div>
+        <div class="tbl-scroll"><table id="routeBreakdown"></table></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">リース会社別 実績</div>
+      <div class="tbl-scroll"><table id="leaseBreakdown"></table></div>
+    </div>
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+  <script>
+    "use strict";
+    // ===== 設定（本体・環境ソリューション課Verと同一プロジェクト） =====
+    const FIREBASE_CONFIG = {
+      apiKey: "AIzaSyCFIYGw6jeOpfuZYL55OR_FivwP9EB7jGA",
+      authDomain: "itr-cs-system.firebaseapp.com",
+      projectId: "itr-cs-system",
+      storageBucket: "itr-cs-system.firebasestorage.app",
+      messagingSenderId: "968069385767",
+      appId: "1:968069385767:web:db5767569c6b78240bc802",
+      measurementId: "G-DVV9HGK16T"
+    };
+    const ALLOWED_EMAILS = ["yu1226barca@gmail.com"];
+    // 課1=本体 / 課2=環境ソリューション課。読み取り専用（書き込みは一切しない）。
+    const COLLECTIONS = [
+      { ka: 1, name: "order_customer_records" },
+      { ka: 2, name: "order_customer_records_env" }
+    ];
+
+    let auth = null, db = null, currentUser = null, authStarted = false;
+    let subs = [];
+    let store = { 1: [], 2: [] };   // 課ごとの最新レコード
+    let scope = "all";
+
+    // ===== 集計ロジック（本体 index.html と同一式） =====
+    const LOST_STATUSES = ["与信NG", "失注"];
+    function num(v) {
+      if (v === null || v === undefined || v === "" || v === "-") return 0;
+      const c = String(v).replaceAll(",", "").replace(/[￥¥\s]/g, "");
+      const n = Number(c); return Number.isFinite(n) ? n : 0;
+    }
+    function roundDown100(v) { return Math.trunc(num(v) / 100) * 100; }
+    function yen(v) { return num(v).toLocaleString("ja-JP", { style: "currency", currency: "JPY", maximumFractionDigits: 0 }); }
+    function calcItemTotal(r) { return (r.items || []).reduce((s, it) => s + (num(it.qty) * num(it.unitCost)), 0); }
+    function calcBaseAmount(r) {
+      const p = r.purchase || {};
+      if (p.method === "現金販売") return num(p.baseAmount);
+      const m = num(p.monthly), rate = num(p.rate);
+      if (m && rate) return roundDown100(m / (rate / 100));
+      return num(p.baseAmount);
+    }
+    function calcGross(r) { return roundDown100(calcBaseAmount(r) - calcItemTotal(r)); }
+    function isLostRecord(r) { return LOST_STATUSES.indexOf((r.fields || {}).progressStatus || "") !== -1; }
+    function isDealRecord(r) { return !isLostRecord(r) && calcGross(r) !== 0; }
+    function normalizeDate(value) {
+      const raw = String(value || "").trim();
+      if (!raw || raw === "-" || raw === "未") return "";
+      const cleaned = raw.replace(/[年月]/g, "/").replace(/日/g, "").replace(/[.．]/g, "/").replace(/\s+/g, "").replace(/－/g, "-");
+      const m = cleaned.match(/^((?:19|20)\d{2})[\/-](\d{1,2})[\/-](\d{1,2})/);
+      if (m) {
+        const y = +m[1], mo = +m[2], d = +m[3];
+        if (mo >= 1 && mo <= 12 && d >= 1 && d <= 31) return `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      }
+      if (/^((?:19|20)\d{2})-\d{2}-\d{2}$/.test(cleaned)) return cleaned;
+      return "";
+    }
+    function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+    function computeMetrics(recs) {
+      const totalGross = recs.reduce((s, r) => s + calcGross(r), 0);
+      const deals = recs.filter(isDealRecord);
+      const totalBase = deals.reduce((s, r) => s + calcBaseAmount(r), 0);
+      const dealGross = deals.reduce((s, r) => s + calcGross(r), 0);
+      const done = recs.filter(r => (r.fields || {}).progressStatus === "工事完了（検収OK）").length;
+      const ng = recs.filter(r => ((r.fields || {}).progressStatus || "") === "与信NG").length;
+      const passed = recs.filter(r => {
+        const s = (r.fields || {}).progressStatus || "";
+        return s.indexOf("与信OK") === 0 || s.indexOf("工事完了") === 0 || s === "書類不備";
+      }).length;
+      const spans = [];
+      recs.forEach(r => {
+        const a = normalizeDate((r.fields || {}).applicationDate);
+        const b = normalizeDate((r.fields || {}).inspectionDate);
+        if (!a || !b) return;
+        const d = (new Date(b) - new Date(a)) / 86400000;
+        if (Number.isFinite(d) && d >= 0) spans.push(d);
+      });
+      return {
+        count: recs.length, done, pending: recs.length - done,
+        gross: totalGross, dealCount: deals.length,
+        grossAvg: deals.length ? Math.round(dealGross / deals.length) : null,
+        grossRate: totalBase ? dealGross / totalBase * 100 : null,
+        approval: (passed + ng) ? passed / (passed + ng) * 100 : null,
+        leadTime: spans.length ? Math.round(spans.reduce((s, v) => s + v, 0) / spans.length) : null
+      };
+    }
+
+    function scopeRecords() {
+      if (scope === "1") return store[1];
+      if (scope === "2") return store[2];
+      return store[1].concat(store[2]);
+    }
+
+    function renderMetrics() {
+      const m = computeMetrics(scopeRecords());
+      const tiles = [
+        ["案件シート数", m.count],
+        ["検収OK", m.done],
+        ["未完了・要対応", m.pending],
+        ["粗利合計", yen(m.gross), true],
+        ["平均粗利 / 件", m.grossAvg == null ? "-" : yen(m.grossAvg)],
+        ["粗利率", m.grossRate == null ? "-" : m.grossRate.toFixed(1) + "%"],
+        ["与信通過率", m.approval == null ? "-" : m.approval.toFixed(0) + "%"],
+        ["平均リードタイム", m.leadTime == null ? "-" : m.leadTime + "日"]
+      ];
+      document.getElementById("metrics").innerHTML = tiles.map(([label, val, hi]) =>
+        `<div class="metric${hi ? " hi" : ""}"><span>${esc(label)}</span><strong>${esc(val)}</strong></div>`).join("");
+    }
+
+    function renderKaSummary() {
+      const m1 = computeMetrics(store[1]);
+      const m2 = computeMetrics(store[2]);
+      const mt = computeMetrics(store[1].concat(store[2]));
+      const rows = [
+        ["案件シート数", m1.count, m2.count, mt.count],
+        ["検収OK", m1.done, m2.done, mt.done],
+        ["未完了・要対応", m1.pending, m2.pending, mt.pending],
+        ["粗利合計", yen(m1.gross), yen(m2.gross), yen(mt.gross)],
+        ["有効案件数", m1.dealCount, m2.dealCount, mt.dealCount],
+        ["平均粗利 / 件", m1.grossAvg == null ? "-" : yen(m1.grossAvg), m2.grossAvg == null ? "-" : yen(m2.grossAvg), mt.grossAvg == null ? "-" : yen(mt.grossAvg)],
+        ["粗利率", m1.grossRate == null ? "-" : m1.grossRate.toFixed(1) + "%", m2.grossRate == null ? "-" : m2.grossRate.toFixed(1) + "%", mt.grossRate == null ? "-" : mt.grossRate.toFixed(1) + "%"]
+      ];
+      document.getElementById("kaSummary").innerHTML =
+        `<thead><tr><th>指標</th><th class="num col-k1"><span class="dot k1"></span>課1</th><th class="num col-k2"><span class="dot k2"></span>課2</th><th class="num">合計</th></tr></thead><tbody>` +
+        rows.map(([label, a, b, t], i) =>
+          `<tr${i === 3 ? ' class="total-row"' : ""}><td>${esc(label)}</td><td class="num">${esc(a)}</td><td class="num">${esc(b)}</td><td class="num">${esc(t)}</td></tr>`
+        ).join("") + `</tbody>`;
+    }
+
+    function renderBreakdown(elementId, label, keyOf, sortBy) {
+      const el = document.getElementById(elementId);
+      if (!el) return;
+      const map = new Map();
+      scopeRecords().filter(isDealRecord).forEach(r => {
+        const k = keyOf(r);
+        if (!k) return;
+        const cur = map.get(k) || { count: 0, gross: 0 };
+        cur.count++; cur.gross += calcGross(r); map.set(k, cur);
+      });
+      if (!map.size) { el.innerHTML = `<tr><td class="breakdown-empty">データがありません</td></tr>`; return; }
+      const rows = Array.from(map.entries()).sort((a, b) =>
+        sortBy === "key-desc" ? String(b[0]).localeCompare(String(a[0])) : b[1].gross - a[1].gross);
+      const tc = rows.reduce((s, x) => s + x[1].count, 0);
+      const tg = rows.reduce((s, x) => s + x[1].gross, 0);
+      el.innerHTML =
+        `<thead><tr><th>${esc(label)}</th><th class="num">件数</th><th class="num">粗利</th><th class="num">平均</th></tr></thead><tbody>` +
+        rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${v.count}</td><td class="num">${yen(v.gross)}</td><td class="num">${yen(Math.round(v.gross / v.count))}</td></tr>`).join("") +
+        `<tr class="total-row"><td>合計</td><td class="num">${tc}</td><td class="num">${yen(tg)}</td><td class="num">${tc ? yen(Math.round(tg / tc)) : "-"}</td></tr></tbody>`;
+    }
+
+    function renderBreakdowns() {
+      const basis = document.getElementById("basisDate").value || "applicationDate";
+      renderBreakdown("monthlyBreakdown", "年月", r => {
+        const d = normalizeDate((r.fields || {})[basis]);
+        return d ? d.slice(0, 7).replace("-", "/") : "";
+      }, "key-desc");
+      renderBreakdown("routeBreakdown", "商流", r => (r.fields || {}).route || "(未設定)");
+      renderBreakdown("leaseBreakdown", "リース会社", r => (r.fields || {}).leaseCompany || "(未設定)");
+      const label = { applicationDate: "申込日", inspectionDate: "検収日", constructionDate: "工事予定日" }[basis] || basis;
+      document.getElementById("basisNote").textContent = "基準日：" + label;
+    }
+
+    function renderAll() { renderMetrics(); renderKaSummary(); renderBreakdowns(); }
+
+    // ===== 認証 =====
+    function setLoginError(m) { const el = document.getElementById("loginError"); if (el) el.textContent = m || ""; }
+    function isAllowedEmail(e) { return ALLOWED_EMAILS.includes(String(e || "").toLowerCase()); }
+    function lockApp(msg) { currentUser = null; document.body.classList.add("auth-locked"); document.getElementById("authStatus").textContent = "未ログイン"; if (msg) setLoginError(msg); teardownData(); }
+    function unlockApp(user) { currentUser = user; document.body.classList.remove("auth-locked"); document.getElementById("authStatus").textContent = "ログイン中：" + user.email; setLoginError(""); }
+
+    function startData() {
+      if (subs.length) return;
+      COLLECTIONS.forEach(c => {
+        const unsub = db.collection(c.name).onSnapshot(snap => {
+          const recs = [];
+          snap.forEach(doc => { const d = doc.data() || {}; d.id = doc.id; d._ka = c.ka; recs.push(d); });
+          store[c.ka] = recs;
+          document.getElementById("updatedLine").innerHTML =
+            `最終同期 <b>${new Date().toLocaleString("ja-JP")}</b> ／ 課1 ${store[1].length}件・課2 ${store[2].length}件（読み取り専用）`;
+          renderAll();
+        }, err => {
+          console.error("read error", c.name, err);
+          document.getElementById("updatedLine").innerHTML =
+            `<span style="color:var(--red)">読み取りエラー（${esc(c.name)}）：Firestoreルールで参照許可が必要かもしれません。${esc(err.code || "")}</span>`;
+        });
+        subs.push(unsub);
+      });
+    }
+    function teardownData() { subs.forEach(u => { try { u(); } catch (e) {} }); subs = []; store = { 1: [], 2: [] }; }
+
+    function initAuth() {
+      if (authStarted) return; authStarted = true;
+      if (typeof firebase === "undefined" || !firebase.auth) { lockApp("Firebase SDKの読み込みに失敗しました。"); return; }
+      if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+      auth = firebase.auth();
+      db = firebase.firestore();
+      auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
+      auth.onAuthStateChanged(async user => {
+        if (!user) { lockApp(""); return; }
+        if (!isAllowedEmail(user.email)) { await auth.signOut(); lockApp("このメールアドレスは許可されていません。"); return; }
+        unlockApp(user); startData();
+      });
+    }
+
+    document.getElementById("loginForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const email = document.getElementById("loginEmail").value.trim().toLowerCase();
+      const password = document.getElementById("loginPassword").value;
+      if (!isAllowedEmail(email)) { setLoginError("このメールアドレスは許可リストにありません。"); return; }
+      try { setLoginError("ログイン中…"); await auth.signInWithEmailAndPassword(email, password); setLoginError(""); }
+      catch (err) {
+        const map = {
+          "auth/invalid-credential": "メールアドレスまたはパスワードが違います。",
+          "auth/wrong-password": "パスワードが違います。",
+          "auth/user-not-found": "ユーザーが見つかりません。",
+          "auth/too-many-requests": "試行が多すぎます。時間を置いてください。",
+          "auth/network-request-failed": "ネットワーク接続を確認してください。"
+        };
+        setLoginError(map[err.code] || ("ログインできませんでした：" + (err.code || err.message)));
+      }
+    });
+    document.getElementById("logoutBtn").addEventListener("click", async () => { if (auth) await auth.signOut(); });
+
+    document.getElementById("scopeSeg").addEventListener("click", e => {
+      const btn = e.target.closest("button[data-scope]"); if (!btn) return;
+      scope = btn.dataset.scope;
+      [...document.querySelectorAll("#scopeSeg button")].forEach(b => b.classList.toggle("active", b === btn));
+      renderMetrics(); renderBreakdowns();
+    });
+    document.getElementById("basisDate").addEventListener("change", renderBreakdowns);
+
+    initAuth();
+  </script>
+</body>
+</html>
