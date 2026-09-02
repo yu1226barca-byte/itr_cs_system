@@ -5355,6 +5355,24 @@
         return `<span class="karte-badge ${cls}">${esc(s || "完了")}</span>`;
       }
 
+      // このカルテが複数顧客(本体customerName＋別名aliases)で共有されている時の警告＋切り離しUI
+      function sharedWarnHtml(currentName) {
+        const al = (K.doc && Array.isArray(K.doc.aliases)) ? K.doc.aliases : [];
+        if (!al.length) return "";
+        const primary = (K.doc && K.doc.customerName) || "";
+        const chips = al.map((a, i) =>
+          `<span class="karte-badge b-pend" style="display:inline-flex;gap:6px;align-items:center">${esc(a)}<button type="button" title="このカルテから切り離す" onclick="karteApi.unlinkAlias(${i})" style="border:none;background:none;color:#b91c1c;font-weight:900;cursor:pointer;font-size:12px;padding:0">✕ 切り離す</button></span>`
+        ).join("");
+        return `<div style="border:1px solid #fca5a5;background:#fef2f2;border-radius:10px;padding:8px 10px;margin-bottom:10px">
+          <div style="font-weight:900;color:#b91c1c;font-size:12px">⚠ このカルテは複数の顧客で共有されています</div>
+          <div style="font-size:11px;color:#7f1d1d;margin:3px 0 7px;line-height:1.5">保守記録・機器情報は下記すべての顧客で共有され、<b>削除すると全員から消えます</b>。別々の事業者なら「切り離す」で分離してください（切り離した顧客は保守記録の無い新しいカルテになります。記録は本体「${esc(primary) || "(無名)"}」側に残ります）。</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+            <span class="karte-badge b-hold">本体: ${esc(primary) || "(無名)"}</span>
+            ${chips}
+          </div>
+        </div>`;
+      }
+
       function mountPanel() {
         const main = document.querySelector(".sheet-main");
         if (!main) return;
@@ -5418,6 +5436,7 @@
           ? `<a class="btn-primary btn-small" style="display:inline-flex;align-items:center;text-decoration:none" href="${esc(dp)}" target="_blank" rel="noopener">開く</a>`
           : `<button class="btn-primary btn-small" type="button" onclick="karteApi.copyDiagram()">パスをコピー</button>`;
         panel.innerHTML = box(`
+          ${sharedWarnHtml(name)}
           <div class="karte-row">
             <button class="karte-tab ${K.tab === "logs" ? "on" : ""}" type="button" onclick="karteApi.tab('logs')">対応履歴（${K.logs.length}）</button>
             <button class="karte-tab ${K.tab === "devices" ? "on" : ""}" type="button" onclick="karteApi.tab('devices')">機器・認証情報（${K.devices.length}）</button>
@@ -5615,6 +5634,20 @@
           } catch (e) { console.error(e); alert("紐付けに失敗しました: " + e.message); }
         },
 
+        // 共有カルテから別名(=別顧客)を1件切り離す。切り離した顧客は名前一致しなくなり、
+        // 次に開くと空の新規カルテになる。保守記録は本体(customerName)側に残る。
+        async unlinkAlias(idx) {
+          const al = (K.doc && Array.isArray(K.doc.aliases)) ? K.doc.aliases : [];
+          const a = al[idx];
+          if (!a) return;
+          if (!confirm(`「${a}」をこのカルテから切り離しますか？\n\n・「${a}」は保守記録の無い新しいカルテになります\n・この記録は本体「${K.doc.customerName || ""}」側に残ります\n・別々の事業者を分ける操作です（記録は消えません）`)) return;
+          try {
+            await karteRef().set({ aliases: firebase.firestore.FieldValue.arrayRemove(a) }, { merge: true });
+            if (K.doc && Array.isArray(K.doc.aliases)) K.doc.aliases = K.doc.aliases.filter(x => x !== a);
+            K.lastName = null; mountPanel();
+          } catch (e) { console.error(e); alert("切り離しに失敗しました: " + e.message); }
+        },
+
         async saveDiagram() {
           const path = val("karteDiagram");
           try {
@@ -5661,7 +5694,12 @@
         },
 
         async delLog(i) {
-          const l = K.logs[i]; if (!l || !confirm("この対応記録を削除しますか？")) return;
+          const l = K.logs[i]; if (!l) return;
+          const al = (K.doc && Array.isArray(K.doc.aliases)) ? K.doc.aliases : [];
+          const msg = al.length
+            ? `⚠ このカルテは複数の顧客で共有されています（本体:${K.doc.customerName || ""} / ${al.join(", ")}）。\nこの対応記録を削除すると、上記すべての顧客から消えます。\n\n別事業者を分けたいだけなら、削除ではなくカルテ上部の「切り離す」を使ってください。\n\n本当に削除しますか？`
+            : "この対応記録を削除しますか？";
+          if (!confirm(msg)) return;
           try { await karteRef().collection("serviceLogs").doc(l._id).delete(); closeModal_(true); await refresh(); }
           catch (e) { console.error(e); alert("削除に失敗しました: " + e.message); }
         },
@@ -5682,7 +5720,12 @@
         },
 
         async delDevice(i) {
-          const d = K.devices[i]; if (!d || !confirm(`機器「${d.name || ""}」を削除しますか？`)) return;
+          const d = K.devices[i]; if (!d) return;
+          const al = (K.doc && Array.isArray(K.doc.aliases)) ? K.doc.aliases : [];
+          const msg = al.length
+            ? `⚠ このカルテは複数の顧客で共有されています（本体:${K.doc.customerName || ""} / ${al.join(", ")}）。\n機器「${d.name || ""}」を削除すると、上記すべての顧客から消えます。本当に削除しますか？`
+            : `機器「${d.name || ""}」を削除しますか？`;
+          if (!confirm(msg)) return;
           try { await karteRef().collection("devices").doc(d._id).delete(); closeModal_(true); await refresh(); }
           catch (e) { console.error(e); alert("削除に失敗しました: " + e.message); }
         }
