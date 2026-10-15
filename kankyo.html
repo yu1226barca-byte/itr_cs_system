@@ -3309,6 +3309,8 @@
     .di-row { display: flex; gap: 10px; align-items: flex-start; padding: 9px 10px; border: 1px solid #e2e8f0; border-radius: 10px; margin: 6px 0; cursor: pointer; }
     .di-row:hover { background: #f1f5f9; }
     .di-row input { margin-top: 2px; width: 16px; height: 16px; flex: none; }
+    .di-wifi { padding: 0 18px 10px; }
+    .di-wifi:empty { display: none; }
     .di-text { font-size: 13px; color: #0f172a; line-height: 1.5; }
     .di-type { display: inline-block; font-size: 11px; font-weight: 700; color: #14532d; background: #d1fae5; border-radius: 9999px; padding: 1px 8px; margin-right: 6px; }
     @media (max-width: 640px) { .sf-grid { grid-template-columns: max-content 1fr; } }
@@ -3470,6 +3472,7 @@
           <span class="di-note">チェックした物品だけが納品書に印字されます。</span>
         </div>
         <div class="di-list" id="deliveryItemList"></div>
+        <div class="di-wifi" id="deliveryWifiOpt"></div>
       </div>
       <div class="modal-actions">
         <button class="btn-primary" id="deliveryItemRunBtn" type="button">この内容で納品書を作成</button>
@@ -3752,7 +3755,8 @@
       [["申込者名", "applicantName", "text"], ["連絡先", "applicantPhone", "text"], ["生年月日", "applicantBirth", "date"]],
       [["申込プラン", "plan", "text"], ["メアド", "email", "text"], ["契約書受渡（発送）日", "documentHandoverDate", "date"]],
       [["割引", "discount", "text"], ["進捗ステータス", "progressStatus", "select", OPTIONS.progress], ["入金予定日", "paymentDate", "date"]],
-      [["リマインダー日", "reminderDate", "date"], ["リマイン内容", "reminderText", "text"], ["", "", "blank"]]
+      [["リマインダー日", "reminderDate", "date"], ["リマイン内容", "reminderText", "text"], ["", "", "blank"]],
+      [["Wi-Fi SSID", "wifiSsid", "text"], ["Wi-Fi パスワード", "wifiPassword", "text"], ["", "", "blank"]]
     ];
 
     const itemFields = [
@@ -4199,6 +4203,8 @@
           documentHandoverDate: "",
           reminderDate: "",
           reminderText: "",
+          wifiSsid: "",
+          wifiPassword: "",
           discount: "無",
           progressStatus: "与信待ち"
         },
@@ -4286,7 +4292,9 @@
       return visible.length ? visible : [blankItem()];
     }
 
-    function buildDeliveryNoteHtml(record, selectedItems) {
+    // opts.wifi: true のとき Wi-Fi 接続情報欄を印字する（未入力なら手書き用の空欄）
+    function buildDeliveryNoteHtml(record, selectedItems, opts) {
+      const showWifi = !!(opts && opts.wifi);
       function buildCopy(copyLabel) {
         const f = record.fields || {};
         // 選択された物品があればそれだけを印字（未指定なら従来どおり自動抽出）
@@ -4309,6 +4317,22 @@
           record.memo,
           record.deliveryMemo
         ].filter(Boolean).join("\n");
+
+        // 印刷用紙に出すため配色はテーマに依存しない中立色で固定
+        const wifiCell = "padding:4px 6px;border:1px solid #cbd5e1;height:24px;word-break:break-all;";
+        const wifiHead = "padding:4px 6px;border:1px solid #cbd5e1;background:#f1f5f9;font-weight:700;text-align:left;white-space:nowrap;";
+        const wifiHtml = showWifi ? `
+            <section class="delivery-wifi-box" style="margin:8px 0 6px;border:1px solid #94a3b8;border-radius:6px;padding:6px 10px;">
+              <div class="delivery-wifi-title" style="font-weight:900;font-size:12px;margin:0 0 4px;">Wi-Fi 接続情報</div>
+              <table class="delivery-wifi-table" style="width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed;">
+                <tr>
+                  <th style="width:15%;${wifiHead}">SSID</th>
+                  <td style="width:35%;${wifiCell}">${esc(f.wifiSsid || "")}</td>
+                  <th style="width:15%;${wifiHead}">パスワード</th>
+                  <td style="width:35%;${wifiCell}">${esc(f.wifiPassword || "")}</td>
+                </tr>
+              </table>
+            </section>` : "";
 
         return `
           <article class="delivery-note delivery-copy-page">
@@ -4363,7 +4387,7 @@
               </thead>
               <tbody>${rows}</tbody>
             </table>
-
+${wifiHtml}
             <section class="delivery-remarks-box" style="display:flex;flex-direction:column;justify-content:flex-start;align-items:stretch;padding-top:5px;padding-bottom:8px;">
               <div class="delivery-remarks-title" style="margin:0 0 4px 0;padding:0 0 4px 0;line-height:1.2;">備考</div>
               <div class="delivery-remarks-content" style="margin:0;padding:0;line-height:1.45;display:block;">${esc(remarks || "")}</div>
@@ -4425,6 +4449,19 @@
           return `<label class="di-row"><input type="checkbox" class="di-check" value="${i}" ${checked} /><span class="di-text">${typeChip}${esc(detail)}</span></label>`;
         }).join("");
       }
+
+      // Wi-Fi 接続情報の印字可否。入力済みなら既定ON、未入力なら既定OFF
+      // （ONにすると手書き用の空欄で印字される）
+      const f = record.fields || {};
+      const hasWifi = !!(String(f.wifiSsid || "").trim() || String(f.wifiPassword || "").trim());
+      const wifiDetail = hasWifi
+        ? [f.wifiSsid ? `SSID: ${f.wifiSsid}` : "", f.wifiPassword ? "パスワード: 入力済み" : ""].filter(Boolean).join("　/　")
+        : "未入力（チェックすると手書き用の空欄を印字）";
+      const wifiBox = document.getElementById("deliveryWifiOpt");
+      if (wifiBox) {
+        wifiBox.innerHTML = `<label class="di-row"><input type="checkbox" id="deliveryWifiCheck" ${hasWifi ? "checked" : ""} />`
+          + `<span class="di-text"><span class="di-type">Wi-Fi</span>Wi-Fi 接続情報を印字<br><span style="font-size:12px;opacity:.75">${esc(wifiDetail)}</span></span></label>`;
+      }
       document.getElementById("deliveryItemModal").classList.add("open");
     }
 
@@ -4448,11 +4485,13 @@
         alert("印字する物品を1つ以上選んでください。");
         return;
       }
+      const wifiCheck = document.getElementById("deliveryWifiCheck");
+      const opts = { wifi: !!(wifiCheck && wifiCheck.checked) };
       closeDeliveryItemPicker(); // 印刷前に必ず閉じる（印刷結果に出さないため）
-      createDeliveryPdf(picked.length ? picked : null);
+      createDeliveryPdf(picked.length ? picked : null, opts);
     }
 
-    function createDeliveryPdf(selectedItems) {
+    function createDeliveryPdf(selectedItems, opts) {
       const record = currentRecord();
       if (!record) {
         alert("納品書を作成する案件がありません。");
@@ -4462,7 +4501,7 @@
       recalcView();
 
       const area = document.getElementById("deliveryPrintArea");
-      area.innerHTML = buildDeliveryNoteHtml(record, selectedItems);
+      area.innerHTML = buildDeliveryNoteHtml(record, selectedItems, opts);
 
       document.body.classList.add("printing-delivery");
 
@@ -5505,6 +5544,31 @@
         document.body.appendChild(el);
       }
 
+      /* ---- 案件情報の Wi-Fi を機器・認証情報へ引き継ぐ ---- */
+      // 取り込んだ機器には src:"delivery" を付け、再取り込み時はその1件を上書きする
+      const WIFI_DEVICE_NAME = "Wi-Fi（納品書）";
+      function wifiFromRecord_(rec) {
+        const f = (rec && rec.fields) || {};
+        const ssid = String(f.wifiSsid || "").trim();
+        const password = String(f.wifiPassword || "").trim();
+        return (ssid || password) ? { ssid, password } : null;
+      }
+      function findWifiDevice_(devices) {
+        return (devices || []).find(d => d.src === "delivery") || (devices || []).find(d => d.name === WIFI_DEVICE_NAME);
+      }
+      async function upsertWifiDevice_(ref, wifi, devices) {
+        const data = { name: WIFI_DEVICE_NAME, role: "Wi-Fi", ssid: wifi.ssid, password: wifi.password, src: "delivery", updatedAt: nowStamp() };
+        const existing = findWifiDevice_(devices);
+        if (existing) {
+          // 備考はカルテ側で書き足している可能性があるので触らない
+          await ref.collection("devices").doc(existing._id).set(data, { merge: true });
+          return "updated";
+        }
+        data.note = "受注顧客管理（納品書）の Wi-Fi 接続情報から登録";
+        await ref.collection("devices").add(data);
+        return "added";
+      }
+
       /* ---- 機器・認証情報: 一覧表示 + モーダル編集（モバイル対応） ---- */
       function devicesHtml() {
         const head = `<thead><tr><th style="width:15%">機器名/項目</th><th style="width:12%">役割</th><th style="width:12%">固定IP</th><th style="width:13%">SSID</th><th style="width:11%">ID</th><th style="width:11%">PASS</th><th style="width:26%">備考</th></tr></thead>`;
@@ -5517,9 +5581,15 @@
           ${td("PASS", d.password ? "●●●●" : "")}
           ${td("備考", d.note ? `<div class="karte-clamp">${esc(d.note)}</div>` : "")}
         </tr>`).join("");
+        const recWifi = wifiFromRecord_(currentRecord());
+        const imported = !!findWifiDevice_(K.devices);
+        const wifiBtn = recWifi
+          ? `<button class="btn-ghost btn-small" type="button" onclick="karteApi.importWifi()">${imported ? "案件のWi-Fiで上書き" : "案件のWi-Fiを取り込み"}</button>`
+          : `<button class="btn-ghost btn-small" type="button" disabled title="案件情報の Wi-Fi SSID / パスワードが未入力です">案件のWi-Fiを取り込み</button>`;
         return `
           <div class="karte-row">
             <button class="btn-primary btn-small" type="button" onclick="karteApi.openDevice(-1)">＋機器を追加</button>
+            ${wifiBtn}
             <span class="karte-note">タップで詳細・編集（PASSはモーダル内で表示）</span>
           </div>
           <table class="karte-table">${head}<tbody>${rows || `<tr><td colspan="7" class="center karte-note">機器情報はまだありません</td></tr>`}</tbody></table>`;
@@ -5614,8 +5684,25 @@
               createdAt: nowStamp()
             });
             K.docId = ref.id; K.doc = (await ref.get()).data();
+            // 案件情報に Wi-Fi が入っていれば、機器・認証情報へ自動で引き継ぐ
+            const wifi = wifiFromRecord_(rec);
+            if (wifi) {
+              try { await upsertWifiDevice_(ref, wifi, []); }
+              catch (e) { console.error("wifi import error:", e); }
+            }
             await refresh();
           } catch (e) { console.error(e); alert("カルテ作成に失敗しました: " + e.message); }
+        },
+
+        async importWifi() {
+          const wifi = wifiFromRecord_(currentRecord());
+          if (!wifi) { alert("案件情報の Wi-Fi SSID / パスワードが未入力です。"); return; }
+          try {
+            const r = await upsertWifiDevice_(karteRef(), wifi, K.devices);
+            K.tab = "devices";
+            await refresh();
+            alert(r === "updated" ? "Wi-Fi情報を最新の内容で上書きしました。" : "Wi-Fi情報を機器・認証情報に登録しました。");
+          } catch (e) { console.error(e); alert("取り込みに失敗しました: " + e.message); }
         },
 
         async link() {
