@@ -5301,7 +5301,8 @@ ${wifiHtml}
       const DIAGRAM_BASE = "\\\\192.168.1.8\\share\\public_新\\■営業本部（営業）\\■水口■\\顧客";
       const LOG_TYPES = ["設置", "保守", "障害", "問合せ", "その他"];
       const LOG_STATUS = ["完了", "対応中", "保留"];
-      const K = { docId: null, doc: null, devices: [], logs: [], tab: "logs", loading: false, lastName: null };
+      // seq: 読込のたびに増やす世代番号。forName: いま K に入っているカルテを読み込んだ案件の屋号
+      const K = { docId: null, doc: null, devices: [], logs: [], tab: "logs", loading: false, lastName: null, seq: 0, forName: null };
 
       const style = document.createElement("style");
       style.textContent = `
@@ -5425,11 +5426,14 @@ ${wifiHtml}
       }
 
       async function loadKarte(name, rec) {
-        K.loading = true; K.docId = null; K.doc = null; K.devices = []; K.logs = [];
+        const my = ++K.seq;
+        K.loading = true; K.docId = null; K.doc = null; K.devices = []; K.logs = []; K.forName = name;
         renderPanel();
         try {
           let snap = await db.collection(KARTE_COLLECTION).where("customerName", "==", name).limit(1).get();
+          if (my !== K.seq) return; // 読込中に別の案件へ切り替わった → 結果は捨てる
           if (snap.empty) snap = await db.collection(KARTE_COLLECTION).where("aliases", "array-contains", name).limit(1).get();
+          if (my !== K.seq) return;
           if (!snap.empty) {
             const d = snap.docs[0];
             K.docId = d.id; K.doc = d.data();
@@ -5439,13 +5443,16 @@ ${wifiHtml}
             await loadSub();
           }
         } catch (e) { console.error("karte load error:", e); }
+        if (my !== K.seq) return;
         K.loading = false;
         renderPanel();
       }
 
       async function loadSub() {
-        const ref = db.collection(KARTE_COLLECTION).doc(K.docId);
+        const id = K.docId;
+        const ref = db.collection(KARTE_COLLECTION).doc(id);
         const [dv, lg] = await Promise.all([ref.collection("devices").get(), ref.collection("serviceLogs").get()]);
+        if (K.docId !== id) return; // 取得中に別のカルテへ切り替わった
         K.devices = dv.docs.map(d => ({ _id: d.id, ...d.data() }));
         K.logs = lg.docs.map(d => ({ _id: d.id, ...d.data() }))
           .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
@@ -5456,6 +5463,8 @@ ${wifiHtml}
         if (!panel) return;
         const rec = currentRecord();
         const name = rec && rec.fields ? (rec.fields.customerName || "") : "";
+        // 表示中の案件と K のカルテが別の案件のものなら、表示せずに読み直す（他社のカルテを出さない）
+        if (name && K.forName !== null && K.forName !== name) { K.lastName = null; mountPanel(); return; }
         if (K.loading) { panel.innerHTML = box(`<div class="karte-note">カルテ読込中…</div>`); return; }
         if (!K.docId) {
           panel.innerHTML = box(`
@@ -5672,6 +5681,7 @@ ${wifiHtml}
           const rec = currentRecord();
           const name = rec && rec.fields ? rec.fields.customerName : "";
           if (!name) return;
+          const my = K.seq;
           try {
             const ref = await db.collection(KARTE_COLLECTION).add({
               customerName: name,
@@ -5683,13 +5693,15 @@ ${wifiHtml}
               note: "",
               createdAt: nowStamp()
             });
-            K.docId = ref.id; K.doc = (await ref.get()).data();
             // 案件情報に Wi-Fi が入っていれば、機器・認証情報へ自動で引き継ぐ
             const wifi = wifiFromRecord_(rec);
             if (wifi) {
               try { await upsertWifiDevice_(ref, wifi, []); }
               catch (e) { console.error("wifi import error:", e); }
             }
+            const doc = (await ref.get()).data();
+            if (my !== K.seq) return; // 作成中に別の案件へ切り替わった → そちらの表示を壊さない
+            K.docId = ref.id; K.doc = doc; K.forName = name;
             await refresh();
           } catch (e) { console.error(e); alert("カルテ作成に失敗しました: " + e.message); }
         },
