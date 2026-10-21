@@ -244,6 +244,28 @@
     .btn-ghost { color: #111827; background: #e7ebf1; }
     .btn-danger { color: var(--red); background: var(--red-soft); }
     .btn-small { min-height: 30px; padding: 6px 9px; border-radius: 9px; font-size: 12px; }
+    /* 工事日程→Googleカレンダー */
+    #calModal { position: fixed; inset: 0; background: rgba(15, 23, 42, .45); z-index: 300; display: flex; align-items: center; justify-content: center; padding: 16px; }
+    #calModal .cal-card { background: #fff; border-radius: 18px; box-shadow: 0 20px 50px rgba(15,23,42,.25); width: min(640px, 96vw); max-height: 92vh; overflow: auto; padding: 16px 18px; }
+    #calModal .cal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    #calModal .cal-grid { display: grid; grid-template-columns: 1.4fr 1fr 1fr auto; gap: 8px; align-items: end; }
+    #calModal .cal-grid label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; font-weight: 900; color: var(--muted); }
+    #calModal .cal-allday { flex-direction: row !important; align-items: center; gap: 5px !important; padding-bottom: 8px; white-space: nowrap; }
+    #calModal .cal-allday input { width: auto; min-height: 0; }
+    #calModal .cal-sub { font-size: 11px; font-weight: 900; color: var(--muted); margin: 12px 0 4px; }
+    #calModal .cal-items { max-height: 180px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 10px; }
+    #calModal textarea { width: 100%; font-size: 12px; line-height: 1.5; resize: vertical; }
+    #calModal #calPreview { background: #f8fafc; color: #334155; }
+    #calModal .cal-warn { margin-top: 8px; color: #b45309; background: #fffbeb; border-radius: 8px; padding: 6px 10px; font-size: 12px; font-weight: 700; }
+    #calModal .cal-note { font-size: 11px; color: var(--muted); margin-top: 8px; line-height: 1.5; }
+    #calModal .cal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+    @media (max-width: 760px) {
+      #calModal { align-items: flex-start; padding: 8px; }
+      #calModal .cal-grid { grid-template-columns: 1fr 1fr; }
+      #calModal input, #calModal select, #calModal textarea { font-size: 16px; }
+      #calModal .cal-actions button { flex: 1; min-height: 44px; }
+    }
+    @media print { #calModal { display: none; } }
     .btn-note { background: var(--purple-soft); color: var(--purple); }
 
     .workbook {
@@ -3408,6 +3430,7 @@
       <button class="btn-ghost" id="duplicateBtn">複製</button>
       <button class="btn-ghost" id="csvBtn">CSV出力</button>
       <button class="btn-primary" id="deliveryPdfBtn" type="button">納品書PDF</button>
+      <button class="btn-primary" id="calendarBtn" type="button">📅 工事日程</button>
       <button class="btn-danger" id="deleteRecordBtn">削除</button>
     </div>
 
@@ -4465,6 +4488,148 @@ ${wifiHtml}
       document.getElementById("deliveryItemModal").classList.add("open");
     }
 
+    /* ★工事日程をGoogleカレンダーへ
+       Googleカレンダーの「予定の作成」画面を、内容を入れた状態で別タブに開く(公式のテンプレートURL)。
+       APIや認証を足さずに済み、登録先のカレンダーは開いた画面で選べる。
+       保存はカレンダー側で押すので、こちらには登録済みかどうかは残らない。日程が変わったらカレンダー側で直す */
+    function calYmd(v) { return String(v || "").replace(/-/g, ""); }
+    function calSlashDate(v) { return /^\d{4}-\d{2}-\d{2}$/.test(String(v || "")) ? String(v).replace(/-/g, "/") : String(v || ""); }
+
+    // 納品物の候補: 名称の入った明細(返金以外)。既定でチェックするのは販売品(と種別なし)
+    function calItemCandidates(record) {
+      return deliveryCandidateIndexes(record)
+        .map(i => ({ i, it: record.items[i] || {} }))
+        .filter(x => x.it.type !== "返金");
+    }
+    function calItemLine(it) {
+      const name = [it.product, it.maker, it.model].map(v => String(v || "").trim()).filter(Boolean).join(" ");
+      const qty = String(it.qty || "").trim();
+      return "・" + name + (qty && qty !== "0" ? " ×" + qty : "");
+    }
+
+    function calDetails(record, pickedItems, memo) {
+      const f = record.fields || {};
+      const v = x => String(x || "").trim();
+      const lines = [];
+      lines.push("■納品物");
+      if (pickedItems.length) pickedItems.forEach(it => lines.push(calItemLine(it)));
+      else lines.push("（未選択）");
+      lines.push("");
+      lines.push("■お客様");
+      lines.push("屋号：" + (v(f.customerName) || "-"));
+      lines.push("住所：" + (v(f.address) || "-"));
+      lines.push("電話番号：" + (v(f.headOfficePhone) || "-"));
+      const mob1 = v(f.contractorPhone), mob2 = v(f.applicantPhone);
+      lines.push("携帯番号：" + (mob1 || mob2 || "-") + (mob1 && mob2 && mob1 !== mob2 ? "（申込者 " + mob2 + "）" : ""));
+      lines.push("代表者：" + (v(f.contractorName) || "-") + (v(f.contractorBirth) ? "（生年月日 " + calSlashDate(f.contractorBirth) + "）" : ""));
+      lines.push("申込者：" + (v(f.applicantName) || "-") + (v(f.applicantBirth) ? "（生年月日 " + calSlashDate(f.applicantBirth) + "）" : ""));
+      lines.push("リース会社：" + (v(f.leaseCompany) || v(record.purchase && record.purchase.company) || "-"));
+      if (v(memo)) { lines.push(""); lines.push("■メモ"); lines.push(v(memo)); }
+      lines.push("");
+      lines.push("（受注顧客管理から登録）");
+      return lines.join("\n");
+    }
+
+    function calTemplateUrl(record, opt) {
+      const f = record.fields || {};
+      const date = opt.date;
+      let dates;
+      if (opt.allDay) {
+        const d = new Date(date + "T00:00:00");
+        d.setDate(d.getDate() + 1);
+        const next = d.getFullYear() + String(d.getMonth() + 1).padStart(2, "0") + String(d.getDate()).padStart(2, "0");
+        dates = calYmd(date) + "/" + next;
+      } else {
+        const [hh, mm] = opt.time.split(":").map(Number);
+        const start = new Date(date + "T00:00:00");
+        start.setHours(hh, mm, 0, 0);
+        const end = new Date(start.getTime() + opt.minutes * 60000);
+        const fmt = d => d.getFullYear() + String(d.getMonth() + 1).padStart(2, "0") + String(d.getDate()).padStart(2, "0")
+          + "T" + String(d.getHours()).padStart(2, "0") + String(d.getMinutes()).padStart(2, "0") + "00";
+        dates = fmt(start) + "/" + fmt(end);
+      }
+      const q = new URLSearchParams({
+        action: "TEMPLATE",
+        text: "【工事】" + (String(f.customerName || "").trim() || "（屋号未入力）"),
+        dates: dates,
+        ctz: "Asia/Tokyo",
+        location: String(f.address || "").trim(),
+        details: opt.details
+      });
+      return "https://calendar.google.com/calendar/render?" + q.toString();
+    }
+
+    function calPickedItems(record) {
+      return Array.from(document.querySelectorAll("#calModal .cal-item:checked"))
+        .map(el => record.items[Number(el.value)]).filter(Boolean);
+    }
+    function calRefreshPreview() {
+      const record = currentRecord();
+      const box = document.getElementById("calPreview");
+      if (!record || !box) return;
+      box.value = calDetails(record, calPickedItems(record), (document.getElementById("calMemo") || {}).value || "");
+      const allDay = document.getElementById("calAllDay").checked;
+      document.getElementById("calTime").disabled = allDay;
+      document.getElementById("calDur").disabled = allDay;
+    }
+
+    function openConstructionCalendar() {
+      const record = currentRecord();
+      if (!record) { alert("案件がありません。"); return; }
+      closeConstructionCalendar();
+      const f = record.fields || {};
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(String(f.constructionDate || "")) ? f.constructionDate : "";
+      const cands = calItemCandidates(record);
+      const itemsHtml = cands.length ? cands.map(({ i, it }) => {
+        const on = !it.type || it.type === "販売品";
+        const chip = it.type ? `<span class="di-type">${esc(it.type)}</span>` : "";
+        return `<label class="di-row"><input type="checkbox" class="cal-item" value="${i}" ${on ? "checked" : ""}><span class="di-text">${chip}${esc(calItemLine(it).slice(1))}</span></label>`;
+      }).join("") : `<div class="search-empty">明細に物品がありません。</div>`;
+      const el = document.createElement("div");
+      el.id = "calModal";
+      el.innerHTML = `<div class="cal-card">
+        <div class="cal-head"><strong>工事日程をGoogleカレンダーへ</strong><button class="btn-ghost btn-small" type="button" id="calCloseBtn">✕ 閉じる</button></div>
+        <div class="cal-grid">
+          <label>工事日<input type="date" id="calDate" value="${esc(date)}"></label>
+          <label>開始<input type="time" id="calTime" value="10:00" step="900"></label>
+          <label>所要時間<select id="calDur"><option value="60">1時間</option><option value="120" selected>2時間</option><option value="180">3時間</option><option value="240">4時間</option><option value="480">8時間</option></select></label>
+          <label class="cal-allday"><input type="checkbox" id="calAllDay"> 終日</label>
+        </div>
+        ${date ? "" : `<div class="cal-warn">工事予定日が未入力です。日付を選んでください（案件の工事予定日は変わりません）。</div>`}
+        <div class="cal-sub">納品物（カレンダーに載せる物品）</div>
+        <div class="cal-items">${itemsHtml}</div>
+        <div class="cal-sub">メモ（任意）</div>
+        <textarea id="calMemo" rows="2" placeholder="例: 駐車場あり、作業は2名"></textarea>
+        <div class="cal-sub">カレンダーに入る内容</div>
+        <textarea id="calPreview" rows="12" readonly></textarea>
+        <div class="cal-note">場所＝住所。開いた画面で登録先のカレンダーを選んで「保存」を押すと登録されます。生年月日などの個人情報も載るので、カレンダーの共有範囲に注意してください。</div>
+        <div class="cal-actions"><button class="btn-ghost" type="button" id="calCancelBtn">キャンセル</button><button class="btn-primary" type="button" id="calOpenBtn">Googleカレンダーで開く</button></div>
+      </div>`;
+      document.body.appendChild(el);
+      el.addEventListener("click", e => { if (e.target === el) closeConstructionCalendar(); });
+      el.addEventListener("input", calRefreshPreview);
+      el.addEventListener("change", calRefreshPreview);
+      document.getElementById("calCloseBtn").onclick = closeConstructionCalendar;
+      document.getElementById("calCancelBtn").onclick = closeConstructionCalendar;
+      document.getElementById("calOpenBtn").onclick = () => {
+        const d = document.getElementById("calDate").value;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) { alert("工事日を選んでください。"); return; }
+        const allDay = document.getElementById("calAllDay").checked;
+        const time = document.getElementById("calTime").value || "10:00";
+        const url = calTemplateUrl(record, {
+          date: d, allDay, time, minutes: Number(document.getElementById("calDur").value) || 120,
+          details: calDetails(record, calPickedItems(record), document.getElementById("calMemo").value)
+        });
+        window.open(url, "_blank", "noopener");
+        closeConstructionCalendar();
+      };
+      calRefreshPreview();
+    }
+    function closeConstructionCalendar() {
+      const el = document.getElementById("calModal");
+      if (el) el.remove();
+    }
+
     function closeDeliveryItemPicker() {
       document.getElementById("deliveryItemModal").classList.remove("open");
     }
@@ -4770,7 +4935,7 @@ ${wifiHtml}
       }
       const record = currentRecord();
       document.getElementById("sheetTab").textContent = record.fields.customerName || record.sheetName || "案件シート";
-      document.getElementById("sheetArea").innerHTML = `<div class="sheet-layout"><main class="sheet-main">${renderInfoGrid(record)}${renderItemsTable(record)}${renderPurchaseTable(record)}<div class="footer-actions"><div><button class="btn-primary" id="addItemBtn" type="button">＋明細行追加</button> <button class="btn-ghost" id="printBtn" type="button">印刷</button> <button class="btn-primary" id="deliveryPdfBtnInline" type="button">納品書PDF</button> <button class="btn-ghost" id="resetSeedBtn" type="button">初期データ再読込</button></div><div class="note">※ 現金販売時はリース会社・料率・回数を自動固定。月額/料率%欄を手入力し、粗利＝手入力金額－仕切り合計で算出。<br>※ グラフの集計基準日は上部で切替可能。データはこのブラウザ内に保存。</div></div></main></div>`;
+      document.getElementById("sheetArea").innerHTML = `<div class="sheet-layout"><main class="sheet-main">${renderInfoGrid(record)}${renderItemsTable(record)}${renderPurchaseTable(record)}<div class="footer-actions"><div><button class="btn-primary" id="addItemBtn" type="button">＋明細行追加</button> <button class="btn-ghost" id="printBtn" type="button">印刷</button> <button class="btn-primary" id="deliveryPdfBtnInline" type="button">納品書PDF</button> <button class="btn-primary" id="calendarBtnInline" type="button">📅 工事日程をカレンダーへ</button> <button class="btn-ghost" id="resetSeedBtn" type="button">初期データ再読込</button></div><div class="note">※ 現金販売時はリース会社・料率・回数を自動固定。月額/料率%欄を手入力し、粗利＝手入力金額－仕切り合計で算出。<br>※ グラフの集計基準日は上部で切替可能。データはこのブラウザ内に保存。</div></div></main></div>`;
       renderMetrics();
       renderRecordSelect();
     }
@@ -5168,6 +5333,7 @@ ${wifiHtml}
       }
       if (target.id === "printBtn") window.print();
       if (target.id === "deliveryPdfBtn" || target.id === "deliveryPdfBtnInline") openDeliveryItemPicker();
+      if (target.id === "calendarBtn" || target.id === "calendarBtnInline") openConstructionCalendar();
       if (target.id === "resetSeedBtn") {
         if (!confirm("初期データを再読込します。現在の保存データは上書きされます。よろしいですか？")) return;
         records = normalizeRecords(deepCopy(SEED_RECORDS));
