@@ -5302,7 +5302,8 @@ ${wifiHtml}
       const LOG_TYPES = ["設置", "保守", "障害", "問合せ", "その他"];
       const LOG_STATUS = ["完了", "対応中", "保留"];
       // seq: 読込のたびに増やす世代番号。forName: いま K に入っているカルテを読み込んだ案件の屋号
-      const K = { docId: null, doc: null, devices: [], logs: [], tab: "logs", loading: false, lastName: null, seq: 0, forName: null };
+      const K = { docId: null, doc: null, devices: [], logs: [], tab: "logs", loading: false, lastName: null, seq: 0, forName: null,
+        photos: null, photosLoading: false, photosFor: null, uploading: "" };
 
       const style = document.createElement("style");
       style.textContent = `
@@ -5367,7 +5368,24 @@ ${wifiHtml}
           /* v4.2: 台帳側修正 - 仕切り合計などの数値セルが縦に折り返される問題 */
           .items-table .item-total, .purchase-table .readonly-cell, .total-value { white-space: nowrap !important; word-break: keep-all !important; overflow: hidden !important; text-overflow: ellipsis !important; }
         }
-        @media print { #kartePanel, #karteModal { display: none; } }
+        /* v5: 設置写真・配線図 */
+        .karte-photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+        .karte-photo { border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; background: #fff; cursor: pointer; box-shadow: 0 4px 12px rgba(15,23,42,.05); }
+        .karte-photo img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: #f1f5f9; }
+        .karte-photo div { padding: 5px 8px; font-size: 11px; line-height: 1.4; }
+        .karte-photo .cap { font-weight: 800; color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .karte-photo .meta { color: var(--muted); }
+        .karte-upload { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+        .karte-upload input { display: none; }
+        .karte-photo-full { display: block; max-width: 100%; max-height: 62vh; margin: 0 auto 10px; border-radius: 10px; background: #f1f5f9; }
+        .karte-netmap-preview { width: 100%; height: 380px; border: 1px solid #243040; border-radius: 12px; background: #0F1620; display: block; }
+        #netmapModal { position: fixed; inset: 0; z-index: 320; background: #0F1620; }
+        #netmapModal iframe { width: 100%; height: 100%; border: 0; display: block; }
+        @media (max-width: 760px) {
+          .karte-photo-grid { grid-template-columns: repeat(2, 1fr) !important; }
+          .karte-netmap-preview { height: 300px !important; }
+        }
+        @media print { #kartePanel, #karteModal, #netmapModal { display: none; } }
       `;
       document.head.appendChild(style);
 
@@ -5428,6 +5446,7 @@ ${wifiHtml}
       async function loadKarte(name, rec) {
         const my = ++K.seq;
         K.loading = true; K.docId = null; K.doc = null; K.devices = []; K.logs = []; K.forName = name;
+        K.photos = null; K.photosFor = null;
         renderPanel();
         try {
           let snap = await db.collection(KARTE_COLLECTION).where("customerName", "==", name).limit(1).get();
@@ -5488,6 +5507,8 @@ ${wifiHtml}
           <div class="karte-row">
             <button class="karte-tab ${K.tab === "logs" ? "on" : ""}" type="button" onclick="karteApi.tab('logs')">対応履歴（${K.logs.length}）</button>
             <button class="karte-tab ${K.tab === "devices" ? "on" : ""}" type="button" onclick="karteApi.tab('devices')">機器・認証情報（${K.devices.length}）</button>
+            <button class="karte-tab ${K.tab === "photos" ? "on" : ""}" type="button" onclick="karteApi.tab('photos')">設置写真${K.photos ? "（" + K.photos.length + "）" : ""}</button>
+            <button class="karte-tab ${K.tab === "netmap" ? "on" : ""}" type="button" onclick="karteApi.tab('netmap')">配線図${K.doc.netmap ? "" : "（未作成）"}</button>
             ${pend ? `<span class="karte-pend">宿題 ${pend}件</span>` : ""}
             <span class="karte-alias">別名（表記ゆれ）:
               <input id="karteAliases" value="${esc(aliases)}" placeholder="例: （株）〇〇, 〇〇商店">
@@ -5501,9 +5522,167 @@ ${wifiHtml}
               ${diagBtn}
             </span>
           </div>
-          ${K.tab === "logs" ? logsHtml() : devicesHtml()}
+          ${K.tab === "logs" ? logsHtml() : K.tab === "devices" ? devicesHtml() : K.tab === "photos" ? photosHtml() : netmapHtml()}
         `);
       }
+
+      /* ---- 設置写真 ----
+         Firebase Storage を使わず Firestore に入れる(新しい設定・課金を増やさないため)。
+         1枚を2文書に分ける: photos/{id} = 一覧用の縮小画像+説明、photoData/{id} = 拡大表示用の画像。
+         一覧を開くだけなら縮小画像しか読まない。1文書1MiBの上限に収まるようブラウザで縮小してから送る */
+      const PHOTO_MAX_EDGE = 1600, PHOTO_MAX_CHARS = 900000, THUMB_EDGE = 360;
+
+      async function loadPhotos() {
+        const id = K.docId;
+        if (!id || K.photosLoading) return;
+        K.photosLoading = true;
+        try {
+          const snap = await db.collection(KARTE_COLLECTION).doc(id).collection("photos").get();
+          if (K.docId !== id) return; // 取得中に別のカルテへ切り替わった
+          K.photos = snap.docs.map(d => ({ _id: d.id, ...d.data() }))
+            .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+          K.photosFor = id;
+        } catch (e) {
+          console.error("photos load error:", e);
+          if (K.docId === id) { K.photos = []; K.photosFor = id; }
+          alert(permissionHint_(e, "写真の読み込みに失敗しました"));
+        } finally {
+          K.photosLoading = false;
+        }
+        renderPanel();
+      }
+
+      function permissionHint_(e, what) {
+        const denied = e && (e.code === "permission-denied" || /permission/i.test(String(e.message || "")));
+        return what + ": " + (e && e.message ? e.message : e) +
+          (denied ? "\n\nFirestoreのセキュリティルールで、カルテの photos / photoData への読み書きが許可されていない可能性があります。" : "");
+      }
+
+      function photosHtml() {
+        if (K.photosFor !== K.docId) {
+          if (!K.photosLoading) setTimeout(loadPhotos, 0);
+          return `<div class="karte-note">写真を読み込み中…</div>`;
+        }
+        const cards = (K.photos || []).map((ph, i) => `<div class="karte-photo" onclick="karteApi.openPhoto(${i})" title="タップで拡大・説明の編集">
+            <img src="${esc(ph.thumb || "")}" alt="" loading="lazy">
+            <div><div class="cap">${esc(ph.caption || "（説明なし）")}</div><div class="meta">${esc(ph.date || "")}${ph.by ? " ・ " + esc(String(ph.by).split("@")[0]) : ""}</div></div>
+          </div>`).join("");
+        return `
+          <div class="karte-row">
+            <label class="btn-primary btn-small karte-upload"${K.uploading ? ' style="opacity:.5;pointer-events:none"' : ""}>＋写真を追加
+              <input type="file" accept="image/*" multiple onchange="karteApi.uploadPhotos(this)">
+            </label>
+            <input id="kartePhotoCaption" placeholder="説明（任意）例: 事務所 ルーター周り" style="max-width:280px;min-height:30px;height:30px;font-size:12px">
+            <span class="karte-note">${K.uploading ? esc(K.uploading) : "スマホはその場で撮影もできます。1枚ずつ縮小して保存します"}</span>
+          </div>
+          ${cards ? `<div class="karte-photo-grid">${cards}</div>` : `<div class="karte-note">設置写真はまだありません</div>`}`;
+      }
+
+      // 画像を縮小して JPEG の dataURL にする。向き(EXIF)はブラウザが反映した状態で描く
+      async function shrinkImage_(file, maxEdge, quality) {
+        let src, w, h, cleanup = () => {};
+        try {
+          src = await createImageBitmap(file, { imageOrientation: "from-image" });
+          w = src.width; h = src.height; cleanup = () => src.close && src.close();
+        } catch (e) {
+          const url = URL.createObjectURL(file);
+          src = await new Promise((ok, ng) => { const im = new Image(); im.onload = () => ok(im); im.onerror = () => ng(new Error("画像を読み込めません（" + file.name + "）")); im.src = url; });
+          w = src.naturalWidth; h = src.naturalHeight; cleanup = () => URL.revokeObjectURL(url);
+        }
+        try {
+          const k = Math.min(1, maxEdge / Math.max(w, h));
+          const cv = document.createElement("canvas");
+          cv.width = Math.max(1, Math.round(w * k)); cv.height = Math.max(1, Math.round(h * k));
+          const g = cv.getContext("2d");
+          g.fillStyle = "#fff"; g.fillRect(0, 0, cv.width, cv.height); // 透過PNGを黒くしない
+          g.drawImage(src, 0, 0, cv.width, cv.height);
+          return { dataUrl: cv.toDataURL("image/jpeg", quality), w: cv.width, h: cv.height };
+        } finally { cleanup(); }
+      }
+
+      async function photoPayload_(file) {
+        let edge = PHOTO_MAX_EDGE, q = 0.82, full;
+        for (let i = 0; i < 8; i++) {
+          full = await shrinkImage_(file, edge, q);
+          if (full.dataUrl.length <= PHOTO_MAX_CHARS) break;
+          if (q > 0.55) q -= 0.1; else edge = Math.round(edge * 0.8);
+        }
+        if (full.dataUrl.length > PHOTO_MAX_CHARS) throw new Error("画像を小さくできませんでした（" + file.name + "）");
+        const thumb = await shrinkImage_(file, THUMB_EDGE, 0.7);
+        return { full, thumb };
+      }
+
+      /* ---- 配線図(NETMAP) ----
+         図は netmap.html(同じ場所に置いたエディタ)を iframe で開き、postMessage でやり取りする。
+         データはカルテ文書の netmap フィールドに JSON のまま入れる(機器・配線・タイトル) */
+      const NETMAP_URL = "netmap.html";
+      const NETMAP_LIMITS = { devices: 300, conns: 600, text: 200 };
+
+      function netmapHtml() {
+        const nm = K.doc && K.doc.netmap;
+        if (!nm || !Array.isArray(nm.devices)) {
+          return `
+            <div class="karte-row">
+              <button class="btn-primary btn-small" type="button" onclick="karteApi.openNetmap()">配線図を作成</button>
+              <span class="karte-note">回線〜ルーター〜HUB・PC・NAS などの構成図を作って、このカルテに保存できます</span>
+            </div>`;
+        }
+        return `
+          <div class="karte-row">
+            <button class="btn-primary btn-small" type="button" onclick="karteApi.openNetmap()">配線図を編集</button>
+            <span class="karte-note">機器${nm.devices.length}台・配線${(nm.conns || []).length}本${nm.updatedAt ? " ／ 最終更新 " + esc(nm.updatedAt) : ""}${nm.updatedBy ? "（" + esc(String(nm.updatedBy).split("@")[0]) + "）" : ""}　PNG出力は編集画面から</span>
+          </div>
+          <iframe class="karte-netmap-preview" id="netmapPreview" src="${NETMAP_URL}?embed=1&readonly=1" title="配線図プレビュー"></iframe>`;
+      }
+
+      // エディタから来たデータを、保存してよい形に整える(型・件数・文字数を制限)
+      function cleanNetmap_(d) {
+        const T = v => String(v == null ? "" : v).slice(0, NETMAP_LIMITS.text);
+        if (!d || !Array.isArray(d.devices) || !Array.isArray(d.conns)) throw new Error("配線図のデータ形式が不正です");
+        if (d.devices.length > NETMAP_LIMITS.devices || d.conns.length > NETMAP_LIMITS.conns) throw new Error("機器・配線の数が多すぎます");
+        const devices = d.devices.map(x => ({ id: T(x.id), type: T(x.type), x: Number(x.x) || 0, y: Number(x.y) || 0, label: T(x.label), ip: T(x.ip) }));
+        const conns = d.conns.map(c => ({ id: T(c.id), from: T(c.from), to: T(c.to), type: T(c.type), label: T(c.label) }));
+        return { title: T(d.title), devices, conns };
+      }
+
+      function closeNetmap_() {
+        const el = document.getElementById("netmapModal");
+        if (el) el.remove();
+        document.body.style.overflow = "";
+        renderPanel();
+      }
+
+      // iframe(エディタ・プレビュー)からのメッセージ。同じオリジンの自分の iframe からだけ受け付ける
+      window.addEventListener("message", async e => {
+        if (e.origin !== location.origin) return;
+        const m = e.data || {};
+        if (typeof m.type !== "string" || m.type.indexOf("netmap:") !== 0) return;
+        const editor = document.querySelector("#netmapModal iframe");
+        const preview = document.getElementById("netmapPreview");
+        const fromEditor = editor && e.source === editor.contentWindow;
+        const fromPreview = preview && e.source === preview.contentWindow;
+        if (!fromEditor && !fromPreview) return;
+        const reply = msg => e.source.postMessage(msg, location.origin);
+        if (m.type === "netmap:ready") {
+          reply({ type: "netmap:load", data: (K.doc && K.doc.netmap) || null, customerName: (K.doc && K.doc.customerName) || "" });
+        } else if (m.type === "netmap:save" && fromEditor) {
+          try {
+            if (!K.docId) throw new Error("カルテが開かれていません");
+            const nm = cleanNetmap_(m.data);
+            nm.updatedAt = nowStamp();
+            nm.updatedBy = (currentUser && currentUser.email) || "";
+            await karteRef().set({ netmap: nm }, { merge: true });
+            K.doc.netmap = nm;
+            reply({ type: "netmap:saved" });
+          } catch (err) {
+            console.error(err);
+            reply({ type: "netmap:save-failed" });
+            alert(permissionHint_(err, "配線図の保存に失敗しました"));
+          }
+        } else if (m.type === "netmap:close" && fromEditor) {
+          closeNetmap_();
+        }
+      });
 
       /* ---- 対応履歴: 一覧は要約、編集はモーダル ---- */
       function logsHtml() {
@@ -5631,6 +5810,41 @@ ${wifiHtml}
         document.body.appendChild(el);
       }
 
+      function openPhotoModal(i) {
+        closeModal_(true);
+        const ph = (K.photos || [])[i];
+        if (!ph) return;
+        const el = buildModal_(`<div class="karte-modal-card">
+          <div class="karte-modal-head">
+            <strong>設置写真</strong>
+            <button class="btn-ghost btn-small" type="button" onclick="karteApi.closeModal()">✕ 閉じる</button>
+          </div>
+          <img class="karte-photo-full" id="kp-img" src="${esc(ph.thumb || "")}" alt="">
+          <div class="karte-modal-grid g3">
+            <div class="karte-field" style="grid-column: span 2"><label>説明</label><input id="kp-caption" value="${esc(ph.caption || "")}" placeholder="例: 事務所 ルーター周り"></div>
+            <div class="karte-field"><label>撮影日</label><input id="kp-date" type="date" value="${esc(ph.date || "")}"></div>
+          </div>
+          <div class="karte-note">${ph.by ? "登録: " + esc(ph.by) + " ／ " : ""}${esc(ph.createdAt || "")}${ph.w ? " ／ " + ph.w + "×" + ph.h : ""}</div>
+          <div class="karte-modal-actions">
+            <button class="btn-danger" type="button" onclick="karteApi.delPhoto(${i})">削除</button>
+            <button class="btn-ghost" type="button" onclick="karteApi.openPhotoFull(${i})">別タブで原寸表示</button>
+            <button class="btn-ghost" type="button" onclick="karteApi.closeModal()">キャンセル</button>
+            <button class="btn-primary" type="button" onclick="karteApi.savePhoto(${i})">保存</button>
+          </div>
+        </div>`);
+        document.body.appendChild(el);
+        // 拡大用の画像は開いたときだけ読む
+        loadPhotoData_(ph._id).then(data => {
+          const img = document.getElementById("kp-img");
+          if (img && data) img.src = data;
+        }).catch(e => console.error("photo data error:", e));
+      }
+
+      async function loadPhotoData_(id) {
+        const d = await karteRef().collection("photoData").doc(id).get();
+        return d.exists ? String(d.data().data || "") : "";
+      }
+
       // 入力途中に背景をクリックしただけで内容が消える事故を防ぐため、
       // 開いた時点の入力値を控えておき、変わっていれば閉じる前に確認する
       let modalBaseline_ = null;
@@ -5669,6 +5883,86 @@ ${wifiHtml}
 
       window.karteApi = {
         tab(t) { K.tab = t; renderPanel(); },
+
+        async uploadPhotos(input) {
+          const files = Array.from((input && input.files) || []).filter(f => /^image\//.test(f.type) || /\.(jpe?g|png|heic|heif|webp|gif)$/i.test(f.name));
+          if (input) input.value = "";
+          if (!files.length || !K.docId) return;
+          const ref = karteRef();
+          const docId = K.docId;
+          const caption = val("kartePhotoCaption");
+          const by = (currentUser && currentUser.email) || "";
+          let ok = 0; const errors = [];
+          for (let n = 0; n < files.length; n++) {
+            K.uploading = "アップロード中 " + (n + 1) + "/" + files.length + "…";
+            renderPanel();
+            try {
+              const { full, thumb } = await photoPayload_(files[n]);
+              const id = ref.collection("photos").doc().id;
+              // 拡大用を先に書く(一覧にだけ載って中身が無い状態を作らない)
+              await ref.collection("photoData").doc(id).set({ data: full.dataUrl });
+              await ref.collection("photos").doc(id).set({
+                thumb: thumb.dataUrl, caption: caption, date: today(), createdAt: nowStamp(), by: by,
+                w: full.w, h: full.h, chars: full.dataUrl.length, fileName: String(files[n].name || "").slice(0, 120),
+                orderRecordId: (currentRecord() && currentRecord().id) || ""
+              });
+              ok++;
+            } catch (e) {
+              console.error("photo upload error:", e);
+              errors.push(permissionHint_(e, files[n].name));
+              if (e && e.code === "permission-denied") break; // 権限が無いなら残りも同じ
+            }
+          }
+          K.uploading = "";
+          const denied = errors.length && !ok && /セキュリティルール/.test(errors[0]);
+          if (K.docId === docId && !denied) { K.photosFor = null; await loadPhotos(); } else renderPanel();
+          if (errors.length) alert(ok + "枚を保存しました。保存できなかったもの:\n" + errors.join("\n"));
+          else { const c = document.getElementById("kartePhotoCaption"); if (c) c.value = ""; }
+        },
+        openPhoto(i) { openPhotoModal(i); },
+        async openPhotoFull(i) {
+          const ph = (K.photos || [])[i];
+          if (!ph) return;
+          const w = window.open("", "_blank");
+          try {
+            const data = await loadPhotoData_(ph._id);
+            if (!data) throw new Error("画像データが見つかりません");
+            const blob = await (await fetch(data)).blob();
+            const url = URL.createObjectURL(blob);
+            if (w) w.location.href = url; else window.open(url, "_blank");
+          } catch (e) { if (w) w.close(); alert("表示できませんでした: " + e.message); }
+        },
+        async savePhoto(i) {
+          const ph = (K.photos || [])[i];
+          if (!ph) return;
+          const upd = { caption: val("kp-caption"), date: val("kp-date") };
+          try {
+            await karteRef().collection("photos").doc(ph._id).set(upd, { merge: true });
+            Object.assign(ph, upd);
+            closeModal_(true); renderPanel();
+          } catch (e) { console.error(e); alert(permissionHint_(e, "保存に失敗しました")); }
+        },
+        async delPhoto(i) {
+          const ph = (K.photos || [])[i];
+          if (!ph) return;
+          if (!confirm("この写真を削除しますか？（元に戻せません）")) return;
+          try {
+            await karteRef().collection("photos").doc(ph._id).delete();
+            await karteRef().collection("photoData").doc(ph._id).delete();
+            closeModal_(true);
+            K.photos.splice(i, 1);
+            renderPanel();
+          } catch (e) { console.error(e); alert(permissionHint_(e, "削除に失敗しました")); }
+        },
+
+        openNetmap() {
+          if (!K.docId || document.getElementById("netmapModal")) return;
+          const el = document.createElement("div");
+          el.id = "netmapModal";
+          el.innerHTML = `<iframe src="${NETMAP_URL}?embed=1" title="配線図エディタ"></iframe>`;
+          document.body.appendChild(el);
+          document.body.style.overflow = "hidden";
+        },
         openLog(i) { openLogModal(i); },
         openDevice(i) { openDeviceModal(i); },
         closeModal() { closeModal_(); },

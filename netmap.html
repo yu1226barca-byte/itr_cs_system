@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>NETMAP - ネットワーク構成図エディタ</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    background: #0F1620; color: #E2E8F0;
+    font-family: 'Hiragino Sans', 'Noto Sans JP', 'Yu Gothic', sans-serif;
+    font-size: 14px; display: flex; flex-direction: column;
+  }
+  /* ---------- ヘッダー ---------- */
+  #header {
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+    background: #131C29; border-bottom: 1px solid #243040; flex-wrap: wrap;
+  }
+  #logo { font-weight: 800; letter-spacing: 2px; font-size: 16px; font-family: ui-monospace, monospace; }
+  #logo span { color: #38BDF8; }
+  #title {
+    background: transparent; border: 1px solid transparent; border-radius: 6px;
+    color: #E2E8F0; font-size: 14px; padding: 6px 10px; width: 240px; outline: none;
+  }
+  #title:focus { border-color: #2E3B4E; background: #0F1620; }
+  .spacer { flex: 1; }
+  button {
+    background: #1A2332; border: 1px solid #2E3B4E; color: #CBD5E1;
+    border-radius: 6px; padding: 7px 13px; cursor: pointer; font-size: 13px;
+    font-family: inherit;
+  }
+  button:hover { background: #243040; }
+  button.primary { background: #38BDF8; color: #0F1620; font-weight: 700; border-color: #38BDF8; }
+  button.primary:hover { background: #5CCBFA; }
+  /* ---------- レイアウト ---------- */
+  #body { display: flex; flex: 1; min-height: 0; }
+  #palette {
+    width: 164px; background: #131C29; border-right: 1px solid #243040;
+    overflow-y: auto; padding: 8px 6px; flex-shrink: 0;
+  }
+  #palette h3 { font-size: 11px; color: #64748B; font-weight: 700; letter-spacing: 1px; padding: 6px 10px; }
+  .pal-item {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    background: transparent; border: none; color: #CBD5E1;
+    padding: 8px 10px; border-radius: 6px; text-align: left; font-size: 13px;
+  }
+  .pal-item:hover { background: #243040; }
+  #canvas-wrap { flex: 1; position: relative; min-width: 0; }
+  #toolbar {
+    position: absolute; top: 10px; left: 10px; right: 10px; z-index: 5;
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    background: rgba(19,28,41,.94); border: 1px solid #243040;
+    border-radius: 8px; padding: 6px 8px;
+  }
+  .tool-btn { background: transparent; border: 1px solid transparent; display: flex; align-items: center; gap: 6px; padding: 6px 10px; }
+  .tool-btn.active { background: #243040; border-color: #38BDF8; color: #fff; }
+  .tool-btn.line-active { background: #243040; }
+  .divider { width: 1px; height: 20px; background: #2E3B4E; margin: 0 4px; }
+  #hint { font-size: 12px; color: #F59E0B; margin-left: 4px; }
+  #svg { width: 100%; height: 100%; display: block; touch-action: none; }
+  /* ---------- プロパティ ---------- */
+  #props {
+    width: 226px; background: #131C29; border-left: 1px solid #243040;
+    padding: 14px; flex-shrink: 0; overflow-y: auto; display: none;
+  }
+  #props.open { display: block; }
+  #props h3 { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-bottom: 12px; }
+  #props label { display: block; font-size: 11px; color: #64748B; margin: 10px 0 4px; font-weight: 600; }
+  #props input, #props select {
+    width: 100%; background: #0F1620; border: 1px solid #2E3B4E; border-radius: 6px;
+    color: #E2E8F0; padding: 8px 10px; font-size: 13px; outline: none; font-family: inherit;
+  }
+  #props input:focus, #props select:focus { border-color: #38BDF8; }
+  .del-btn {
+    width: 100%; margin-top: 18px; background: transparent;
+    border: 1px solid #7F3B45; color: #F87171;
+  }
+  .del-btn:hover { background: rgba(248,113,113,.1); }
+  .conn-info { font-size: 12px; color: #94A3B8; margin-bottom: 8px; }
+  /* ---------- 受注顧客管理(保守カルテ)への埋め込み ---------- */
+  .embed-only { display: none; }
+  body.embed .embed-only { display: inline-block; }
+  body.embed .standalone-only { display: none; }
+  #save-msg { font-size: 12px; color: #34D399; }
+  /* 閲覧専用(カルテのプレビュー): 編集UIを隠し、パン・ズームだけ */
+  body.ro #header, body.ro #palette, body.ro #props, body.ro [data-mode], body.ro #line-tools { display: none !important; }
+  body.ro #toolbar { left: auto; right: 8px; top: 8px; background: rgba(19,28,41,.8); }
+  body.ro #toolbar .spacer { display: none; }
+  /* ---------- モバイル ---------- */
+  @media (max-width: 640px) {
+    #palette { width: 60px; }
+    .pal-item span { display: none; }
+    #props { position: absolute; right: 0; top: 0; bottom: 0; z-index: 10; box-shadow: -4px 0 16px rgba(0,0,0,.4); }
+    #title { width: 130px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <div id="logo">NET<span>MAP</span></div>
+  <input id="title" value="ネットワーク構成図">
+  <div class="spacer"></div>
+  <span id="save-msg" class="embed-only"></span>
+  <button id="btn-save" class="standalone-only">保存 (JSON)</button>
+  <button id="btn-export" class="embed-only">JSON書出し</button>
+  <button id="btn-load">読込</button>
+  <button id="btn-png">PNG出力</button>
+  <button id="btn-store" class="primary embed-only">カルテに保存</button>
+  <button id="btn-close" class="embed-only">閉じる</button>
+  <input type="file" id="file-input" accept=".json" style="display:none">
+</div>
+
+<div id="body">
+  <div id="palette"><h3>機器を追加</h3></div>
+
+  <div id="canvas-wrap">
+    <div id="toolbar">
+      <button class="tool-btn active" data-mode="select">選択・移動</button>
+      <button class="tool-btn" data-mode="connect">配線</button>
+      <button class="tool-btn" data-mode="delete">削除</button>
+      <span id="line-tools" style="display:none; align-items:center; gap:6px;">
+        <span class="divider"></span>
+        <button class="tool-btn line-btn line-active" data-line="lan"><svg width="26" height="10"><line x1="1" y1="5" x2="25" y2="5" stroke="#64748B" stroke-width="2"/></svg>有線LAN</button>
+        <button class="tool-btn line-btn" data-line="wan"><svg width="26" height="10"><line x1="1" y1="5" x2="25" y2="5" stroke="#F59E0B" stroke-width="3"/></svg>WAN回線</button>
+        <button class="tool-btn line-btn" data-line="wifi"><svg width="26" height="10"><line x1="1" y1="5" x2="25" y2="5" stroke="#34D399" stroke-width="2" stroke-dasharray="6 5"/></svg>無線</button>
+        <span id="hint">接続元の機器をクリック</span>
+      </span>
+      <span class="spacer"></span>
+      <button class="tool-btn" id="btn-zoom-in">＋</button>
+      <button class="tool-btn" id="btn-zoom-out">－</button>
+      <button class="tool-btn" id="btn-fit">全体</button>
+    </div>
+
+    <svg id="svg">
+      <defs>
+        <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse">
+          <circle cx="1" cy="1" r="1" fill="#243040"/>
+        </pattern>
+      </defs>
+      <rect width="100%" height="100%" fill="#0F1620"/>
+      <rect id="dots-bg" width="100%" height="100%" fill="url(#dots)"/>
+      <g id="content"></g>
+    </svg>
+  </div>
+
+  <div id="props"></div>
+</div>
+
+<script>
+"use strict";
+
+// ?embed=1 … 受注顧客管理の保守カルテから iframe で開かれたとき。
+//   保存はファイルではなく親画面へ postMessage で渡し、親がFirestore(カルテ)へ書く
+// ?embed=1&readonly=1 … カルテのプレビュー用。編集UIを隠してパン・ズームだけ
+const PARAMS = new URLSearchParams(location.search);
+const EMBED = PARAMS.get("embed") === "1" && window.parent !== window;
+const READONLY = EMBED && PARAMS.get("readonly") === "1";
+if (EMBED) document.body.classList.add("embed");
+if (READONLY) document.body.classList.add("ro");
+
+// ================= 定義 =================
+const DEVICE_TYPES = {
+  onu:     { label: "ONU",           color: "#94A3B8", icon: "onu" },
+  router:  { label: "ルーター",       color: "#38BDF8", icon: "router" },
+  utm:     { label: "UTM",           color: "#F87171", icon: "shield" },
+  hub:     { label: "HUB/SW",        color: "#A78BFA", icon: "hub" },
+  ap:      { label: "AP",            color: "#34D399", icon: "wifi" },
+  pc:      { label: "PC",            color: "#FBBF24", icon: "pc" },
+  server:  { label: "サーバー",       color: "#FB923C", icon: "server" },
+  nas:     { label: "NAS",           color: "#F472B6", icon: "nas" },
+  printer: { label: "プリンター",     color: "#CBD5E1", icon: "printer" },
+  nvr:     { label: "NVR/カメラ",     color: "#E879F9", icon: "camera" },
+  phone:   { label: "電話/PBX",      color: "#2DD4BF", icon: "phone" },
+  cloud:   { label: "インターネット", color: "#60A5FA", icon: "cloud" },
+};
+const LINE_TYPES = {
+  lan:  { label: "有線LAN", color: "#64748B", dash: "",    width: 2 },
+  wan:  { label: "WAN回線", color: "#F59E0B", dash: "",    width: 3 },
+  wifi: { label: "無線",    color: "#34D399", dash: "6 5", width: 2 },
+};
+const W = 128, H = 56;
+
+const ICONS = {
+  router:  '<rect x="2" y="8" width="20" height="9" rx="2"/><path d="M6 12.5h.01M10 12.5h.01"/><path d="M16 8V4m4 4V5"/>',
+  hub:     '<rect x="2" y="9" width="20" height="8" rx="1.5"/><path d="M5.5 13h.01M9 13h.01M12.5 13h.01M16 13h.01M19 13h.01"/>',
+  wifi:    '<path d="M4 11a12 12 0 0 1 16 0"/><path d="M7.5 14.5a7 7 0 0 1 9 0"/><circle cx="12" cy="18" r="1.3" class="fill"/>',
+  pc:      '<rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M9 20h6M12 16v4"/>',
+  server:  '<rect x="5" y="4" width="14" height="7" rx="1.5"/><rect x="5" y="13" width="14" height="7" rx="1.5"/><path d="M8.5 7.5h.01M8.5 16.5h.01"/>',
+  nas:     '<rect x="5" y="5" width="14" height="15" rx="2"/><path d="M8 9h8M8 12.5h8M8 16h5"/>',
+  shield:  '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z"/><path d="M9 12l2 2 4-4"/>',
+  printer: '<rect x="5" y="9" width="14" height="8" rx="1.5"/><path d="M8 9V5h8v4M8 17v3h8v-3"/>',
+  camera:  '<rect x="3" y="8" width="13" height="9" rx="2"/><path d="M16 11l5-2.5v7L16 13"/>',
+  phone:   '<path d="M6 4h4l1.5 5-2.5 1.5a12 12 0 0 0 4.5 4.5L15 12.5l5 1.5v4a2 2 0 0 1-2 2A14 14 0 0 1 4 6a2 2 0 0 1 2-2z"/>',
+  cloud:   '<path d="M7 18a4.5 4.5 0 0 1-.5-9A6 6 0 0 1 18 10a4 4 0 0 1-1 8H7z"/>',
+  onu:     '<rect x="7" y="4" width="10" height="17" rx="2"/><path d="M10.5 8h3M12 12h.01M12 15h.01"/>',
+};
+function iconSVG(iconName, color, size) {
+  const body = ICONS[iconName].split('class="fill"').join('fill="' + color + '"');
+  return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="' + color + '" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + body + '</svg>';
+}
+function iconGroup(iconName, color) {
+  const body = ICONS[iconName].split('class="fill"').join('fill="' + color + '"');
+  return '<g fill="none" stroke="' + color + '" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + body + '</g>';
+}
+function esc(s) {
+  return String(s).split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;').split('"').join('&quot;');
+}
+
+// ================= 状態 =================
+let idSeq = 100;
+const nid = p => p + (idSeq++);
+
+const SAMPLE_DEVICES = [
+    { id: "d1", type: "cloud",  x: 340, y: 40,  label: "インターネット", ip: "" },
+    { id: "d2", type: "onu",    x: 340, y: 150, label: "ONU", ip: "" },
+    { id: "d3", type: "router", x: 340, y: 260, label: "RTX830", ip: "192.168.1.1" },
+    { id: "d4", type: "utm",    x: 340, y: 370, label: "UTM", ip: "192.168.1.2" },
+    { id: "d5", type: "hub",    x: 340, y: 480, label: "SWX2110", ip: "" },
+    { id: "d6", type: "pc",     x: 100, y: 600, label: "事務PC-01", ip: "192.168.1.11" },
+    { id: "d7", type: "ap",     x: 340, y: 600, label: "WLX212", ip: "192.168.1.5" },
+    { id: "d8", type: "nas",    x: 580, y: 600, label: "TeraStation", ip: "192.168.1.20" },
+    { id: "d9", type: "pc",     x: 580, y: 710, label: "ノートPC", ip: "DHCP" },
+];
+const SAMPLE_CONNS = [
+    { id: "c1", from: "d1", to: "d2", type: "wan", label: "光回線" },
+    { id: "c2", from: "d2", to: "d3", type: "wan", label: "PPPoE" },
+    { id: "c3", from: "d3", to: "d4", type: "lan", label: "" },
+    { id: "c4", from: "d4", to: "d5", type: "lan", label: "" },
+    { id: "c5", from: "d5", to: "d6", type: "lan", label: "" },
+    { id: "c6", from: "d5", to: "d7", type: "lan", label: "PoE" },
+    { id: "c7", from: "d5", to: "d8", type: "lan", label: "" },
+    { id: "c8", from: "d7", to: "d9", type: "wifi", label: "Wi-Fi" },
+];
+// カルテで新しく作るときのひな形(回線〜ルーターまで)
+const STARTER_DEVICES = [
+  { id: "d1", type: "cloud",  x: 340, y: 40,  label: "インターネット", ip: "" },
+  { id: "d2", type: "onu",    x: 340, y: 150, label: "ONU", ip: "" },
+  { id: "d3", type: "router", x: 340, y: 260, label: "ルーター", ip: "" },
+];
+const STARTER_CONNS = [
+  { id: "c1", from: "d1", to: "d2", type: "wan", label: "光回線" },
+  { id: "c2", from: "d2", to: "d3", type: "wan", label: "" },
+];
+
+const state = {
+  devices: EMBED ? [] : SAMPLE_DEVICES,
+  conns: EMBED ? [] : SAMPLE_CONNS,
+  mode: "select", lineType: "lan",
+  selected: null,        // { kind:'device'|'conn', id }
+  connectFrom: null,
+  view: { x: 60, y: 10, k: 1 },
+};
+let drag = null;
+
+const $ = id => document.getElementById(id);
+const svg = $("svg"), content = $("content"), props = $("props");
+const devById = id => state.devices.find(d => d.id === id);
+
+// ================= 描画 =================
+function renderDiagram() {
+  let out = "";
+  // 配線
+  for (const c of state.conns) {
+    const a = devById(c.from), b = devById(c.to);
+    if (!a || !b) continue;
+    const t = LINE_TYPES[c.type] || LINE_TYPES.lan;
+    const sel = state.selected && state.selected.kind === "conn" && state.selected.id === c.id;
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    out += '<g data-conn="' + c.id + '" style="cursor:pointer">';
+    out += '<line x1="' + a.x + '" y1="' + a.y + '" x2="' + b.x + '" y2="' + b.y + '" stroke="transparent" stroke-width="14"/>';
+    out += '<line x1="' + a.x + '" y1="' + a.y + '" x2="' + b.x + '" y2="' + b.y + '" stroke="' + (sel ? "#38BDF8" : t.color) + '" stroke-width="' + (sel ? t.width + 1 : t.width) + '"' + (t.dash ? ' stroke-dasharray="' + t.dash + '"' : '') + '/>';
+    if (c.label) {
+      const bw = c.label.length * 12 + 12;
+      out += '<rect x="' + (mx - bw / 2) + '" y="' + (my - 10) + '" width="' + bw + '" height="20" rx="4" fill="#1A2332" stroke="' + (sel ? "#38BDF8" : "#2E3B4E") + '"/>';
+      out += '<text x="' + mx + '" y="' + (my + 4) + '" text-anchor="middle" font-size="11" fill="#94A3B8">' + esc(c.label) + '</text>';
+    }
+    out += '</g>';
+  }
+  // 機器
+  for (const d of state.devices) {
+    const t = DEVICE_TYPES[d.type];
+    const sel = state.selected && state.selected.kind === "device" && state.selected.id === d.id;
+    const isFrom = state.connectFrom === d.id;
+    out += '<g data-dev="' + d.id + '" transform="translate(' + (d.x - W / 2) + ' ' + (d.y - H / 2) + ')" style="cursor:' + (state.mode === "select" ? "grab" : "pointer") + '">';
+    out += '<rect width="' + W + '" height="' + H + '" rx="8" fill="#1A2332" stroke="' + (isFrom ? "#F59E0B" : sel ? "#38BDF8" : "#2E3B4E") + '" stroke-width="' + (sel || isFrom ? 2 : 1) + '"/>';
+    out += '<rect width="4" height="' + H + '" rx="2" fill="' + t.color + '"/>';
+    out += '<g transform="translate(12 ' + (H / 2 - 12) + ')">' + iconGroup(t.icon, t.color) + '</g>';
+    out += '<text x="44" y="' + (d.ip ? 24 : H / 2 + 4) + '" font-size="12" font-weight="600" fill="#E2E8F0" font-family="sans-serif">' + esc(d.label) + '</text>';
+    if (d.ip) out += '<text x="44" y="41" font-size="10.5" fill="#7C8DA5" font-family="ui-monospace,monospace">' + esc(d.ip) + '</text>';
+    out += '</g>';
+  }
+  content.innerHTML = out;
+  applyView();
+}
+
+function applyView() {
+  const v = state.view;
+  content.setAttribute("transform", "translate(" + v.x + " " + v.y + ") scale(" + v.k + ")");
+  document.querySelector("#dots").setAttribute("patternTransform", "translate(" + v.x + " " + v.y + ") scale(" + v.k + ")");
+}
+
+// ================= プロパティパネル =================
+function renderProps() {
+  const s = state.selected;
+  if (!s) { props.className = ""; props.innerHTML = ""; return; }
+  props.className = "open";
+
+  if (s.kind === "device") {
+    const d = devById(s.id);
+    if (!d) { state.selected = null; props.className = ""; return; }
+    const t = DEVICE_TYPES[d.type];
+    let opts = "";
+    for (const k in DEVICE_TYPES) opts += '<option value="' + k + '"' + (k === d.type ? " selected" : "") + '>' + DEVICE_TYPES[k].label + '</option>';
+    props.innerHTML =
+      '<h3>' + iconSVG(t.icon, t.color, 20) + esc(t.label) + '</h3>' +
+      '<label>名前</label><input id="p-label" value="' + esc(d.label) + '">' +
+      '<label>IPアドレス</label><input id="p-ip" value="' + esc(d.ip) + '" placeholder="192.168.1.1">' +
+      '<label>種類</label><select id="p-type">' + opts + '</select>' +
+      '<button class="del-btn" id="p-del">この機器を削除</button>';
+    $("p-label").oninput = e => { d.label = e.target.value; renderDiagram(); };
+    $("p-ip").oninput = e => { d.ip = e.target.value; renderDiagram(); };
+    $("p-type").onchange = e => { d.type = e.target.value; renderDiagram(); renderProps(); };
+    $("p-del").onclick = () => deleteDevice(d.id);
+  } else {
+    const c = state.conns.find(x => x.id === s.id);
+    if (!c) { state.selected = null; props.className = ""; return; }
+    const a = devById(c.from), b = devById(c.to);
+    let opts = "";
+    for (const k in LINE_TYPES) opts += '<option value="' + k + '"' + (k === c.type ? " selected" : "") + '>' + LINE_TYPES[k].label + '</option>';
+    props.innerHTML =
+      '<h3>配線の設定</h3>' +
+      '<div class="conn-info">' + esc(a ? a.label : "?") + ' — ' + esc(b ? b.label : "?") + '</div>' +
+      '<label>ラベル（PoE・VLAN等）</label><input id="p-clabel" value="' + esc(c.label) + '">' +
+      '<label>種類</label><select id="p-ctype">' + opts + '</select>' +
+      '<button class="del-btn" id="p-cdel">この配線を削除</button>';
+    $("p-clabel").oninput = e => { c.label = e.target.value; renderDiagram(); };
+    $("p-ctype").onchange = e => { c.type = e.target.value; renderDiagram(); };
+    $("p-cdel").onclick = () => deleteConn(c.id);
+  }
+}
+
+function select(sel) { state.selected = sel; renderDiagram(); renderProps(); }
+
+function deleteDevice(id) {
+  state.devices = state.devices.filter(d => d.id !== id);
+  state.conns = state.conns.filter(c => c.from !== id && c.to !== id);
+  select(null);
+}
+function deleteConn(id) {
+  state.conns = state.conns.filter(c => c.id !== id);
+  select(null);
+}
+
+// ================= パレット =================
+(function buildPalette() {
+  const pal = $("palette");
+  for (const k in DEVICE_TYPES) {
+    const t = DEVICE_TYPES[k];
+    const b = document.createElement("button");
+    b.className = "pal-item";
+    b.innerHTML = iconSVG(t.icon, t.color, 24) + '<span>' + t.label + '</span>';
+    b.onclick = () => {
+      const r = svg.getBoundingClientRect();
+      const cx = (r.width / 2 - state.view.x) / state.view.k;
+      const cy = (r.height / 2 - state.view.y) / state.view.k;
+      const d = { id: nid("d"), type: k, x: Math.round((cx + Math.random() * 60 - 30) / 10) * 10, y: Math.round((cy + Math.random() * 60 - 30) / 10) * 10, label: t.label, ip: "" };
+      state.devices.push(d);
+      setMode("select");
+      select({ kind: "device", id: d.id });
+    };
+    pal.appendChild(b);
+  }
+})();
+
+// ================= ツールバー =================
+function setMode(m) {
+  state.mode = m; state.connectFrom = null;
+  document.querySelectorAll("[data-mode]").forEach(b => b.classList.toggle("active", b.dataset.mode === m));
+  $("line-tools").style.display = m === "connect" ? "inline-flex" : "none";
+  updateHint();
+  renderDiagram();
+}
+function updateHint() {
+  $("hint").textContent = state.connectFrom ? "接続先の機器をクリック" : "接続元の機器をクリック";
+}
+document.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => setMode(b.dataset.mode));
+document.querySelectorAll(".line-btn").forEach(b => b.onclick = () => {
+  state.lineType = b.dataset.line;
+  document.querySelectorAll(".line-btn").forEach(x => x.classList.toggle("line-active", x === b));
+});
+
+function zoom(f) {
+  const r = svg.getBoundingClientRect();
+  const cx = r.width / 2, cy = r.height / 2;
+  const v = state.view;
+  const k = Math.min(2.5, Math.max(0.3, v.k * f));
+  state.view = { k: k, x: cx - ((cx - v.x) / v.k) * k, y: cy - ((cy - v.y) / v.k) * k };
+  applyView();
+}
+$("btn-zoom-in").onclick = () => zoom(1.2);
+$("btn-zoom-out").onclick = () => zoom(1 / 1.2);
+$("btn-fit").onclick = () => {
+  if (!state.devices.length) return;
+  const r = svg.getBoundingClientRect();
+  const minX = Math.min(...state.devices.map(d => d.x)) - W, maxX = Math.max(...state.devices.map(d => d.x)) + W;
+  const minY = Math.min(...state.devices.map(d => d.y)) - H - 60, maxY = Math.max(...state.devices.map(d => d.y)) + H;
+  const k = Math.min(2, Math.max(0.3, Math.min(r.width / (maxX - minX), r.height / (maxY - minY))));
+  state.view = { k: k, x: r.width / 2 - (minX + maxX) / 2 * k, y: r.height / 2 - (minY + maxY) / 2 * k };
+  applyView();
+};
+
+// ================= ポインタ操作 =================
+function toWorld(e) {
+  const r = svg.getBoundingClientRect();
+  return { x: (e.clientX - r.left - state.view.x) / state.view.k, y: (e.clientY - r.top - state.view.y) / state.view.k };
+}
+
+svg.addEventListener("pointerdown", e => {
+  const devEl = READONLY ? null : e.target.closest("[data-dev]");
+  const connEl = READONLY ? null : e.target.closest("[data-conn]");
+  svg.setPointerCapture(e.pointerId);
+
+  if (devEl) {
+    const d = devById(devEl.dataset.dev);
+    if (state.mode === "delete") { deleteDevice(d.id); return; }
+    if (state.mode === "connect") {
+      if (!state.connectFrom) state.connectFrom = d.id;
+      else if (state.connectFrom !== d.id) {
+        state.conns.push({ id: nid("c"), from: state.connectFrom, to: d.id, type: state.lineType, label: "" });
+        state.connectFrom = null;
+      } else state.connectFrom = null;
+      updateHint(); renderDiagram(); return;
+    }
+    const w = toWorld(e);
+    drag = { kind: "device", id: d.id, dx: w.x - d.x, dy: w.y - d.y };
+    select({ kind: "device", id: d.id });
+    return;
+  }
+  if (connEl) {
+    const c = state.conns.find(x => x.id === connEl.dataset.conn);
+    if (state.mode === "delete") { deleteConn(c.id); return; }
+    select({ kind: "conn", id: c.id });
+    return;
+  }
+  // 背景: パン
+  if (state.selected) select(null);
+  state.connectFrom = null; updateHint();
+  drag = { kind: "pan", sx: e.clientX, sy: e.clientY, vx: state.view.x, vy: state.view.y };
+});
+
+svg.addEventListener("pointermove", e => {
+  if (!drag) return;
+  if (drag.kind === "device") {
+    const d = devById(drag.id);
+    if (!d) return;
+    const w = toWorld(e);
+    d.x = Math.round((w.x - drag.dx) / 10) * 10;
+    d.y = Math.round((w.y - drag.dy) / 10) * 10;
+    renderDiagram();
+  } else {
+    state.view.x = drag.vx + e.clientX - drag.sx;
+    state.view.y = drag.vy + e.clientY - drag.sy;
+    applyView();
+  }
+});
+svg.addEventListener("pointerup", () => { drag = null; });
+svg.addEventListener("pointercancel", () => { drag = null; });
+
+// ホイールズーム
+svg.addEventListener("wheel", e => {
+  e.preventDefault();
+  const r = svg.getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  const v = state.view;
+  const k = Math.min(2.5, Math.max(0.3, v.k * (e.deltaY < 0 ? 1.1 : 1 / 1.1)));
+  state.view = { k: k, x: mx - ((mx - v.x) / v.k) * k, y: my - ((my - v.y) / v.k) * k };
+  applyView();
+}, { passive: false });
+
+// Deleteキー
+window.addEventListener("keydown", e => {
+  const tag = document.activeElement.tagName;
+  if (!READONLY && (e.key === "Delete" || e.key === "Backspace") && state.selected && tag !== "INPUT" && tag !== "SELECT" && tag !== "TEXTAREA") {
+    e.preventDefault();
+    state.selected.kind === "device" ? deleteDevice(state.selected.id) : deleteConn(state.selected.id);
+  }
+});
+
+// ================= 保存・読込・PNG =================
+$("btn-save").onclick = $("btn-export").onclick = () => {
+  const data = { title: $("title").value, devices: state.devices, conns: state.conns };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = $("title").value.split(" ").join("_") + ".json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+$("btn-load").onclick = () => $("file-input").click();
+$("file-input").onchange = e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    try {
+      loadDiagram(JSON.parse(rd.result));
+    } catch (err) { alert("JSONの読み込みに失敗しました"); }
+  };
+  rd.readAsText(f);
+  e.target.value = "";
+};
+
+$("btn-png").onclick = () => {
+  if (!state.devices.length) return;
+  const pad = 60;
+  const minX = Math.min(...state.devices.map(d => d.x)) - W / 2 - pad;
+  const minY = Math.min(...state.devices.map(d => d.y)) - H / 2 - pad - 30;
+  const maxX = Math.max(...state.devices.map(d => d.x)) + W / 2 + pad;
+  const maxY = Math.max(...state.devices.map(d => d.y)) + H / 2 + pad;
+  const w = maxX - minX, h = maxY - minY;
+  const prevSel = state.selected, prevFrom = state.connectFrom;
+  state.selected = null; state.connectFrom = null;
+  renderDiagram();
+  const inner = content.innerHTML;
+  state.selected = prevSel; state.connectFrom = prevFrom;
+  renderDiagram(); renderProps();
+
+  const svgStr = '<svg xmlns="http://www.w3.org/2000/svg" width="' + w * 2 + '" height="' + h * 2 + '" viewBox="' + minX + ' ' + minY + ' ' + w + ' ' + h + '">' +
+    '<rect x="' + minX + '" y="' + minY + '" width="' + w + '" height="' + h + '" fill="#0F1620"/>' +
+    '<text x="' + (minX + 24) + '" y="' + (minY + 38) + '" fill="#E2E8F0" font-size="18" font-weight="700" font-family="sans-serif">' + esc($("title").value) + '</text>' +
+    inner + '</svg>';
+
+  const img = new Image();
+  img.onload = () => {
+    const cv = document.createElement("canvas");
+    cv.width = w * 2; cv.height = h * 2;
+    cv.getContext("2d").drawImage(img, 0, 0);
+    const a = document.createElement("a");
+    a.href = cv.toDataURL("image/png");
+    a.download = $("title").value.split(" ").join("_") + ".png";
+    a.click();
+  };
+  img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgStr);
+};
+
+function loadDiagram(j) {
+  // 種類が分からない機器・つながっていない配線は落とす(壊れたデータで描画が止まらないように)
+  state.devices = (Array.isArray(j.devices) ? j.devices : []).filter(d => d && DEVICE_TYPES[d.type])
+    .map(d => ({ id: String(d.id), type: d.type, x: Number(d.x) || 0, y: Number(d.y) || 0, label: String(d.label || ""), ip: String(d.ip || "") }));
+  const ids = new Set(state.devices.map(d => d.id));
+  state.conns = (Array.isArray(j.conns) ? j.conns : []).filter(c => c && ids.has(String(c.from)) && ids.has(String(c.to)))
+    .map(c => ({ id: String(c.id), from: String(c.from), to: String(c.to), type: LINE_TYPES[c.type] ? c.type : "lan", label: String(c.label || "") }));
+  if (j.title) $("title").value = String(j.title);
+  // ID重複防止
+  for (const x of state.devices.concat(state.conns)) {
+    const n = parseInt(String(x.id).replace(/[^0-9]/g, ""), 10);
+    if (!isNaN(n) && n >= idSeq) idSeq = n + 1;
+  }
+  select(null);
+  $("btn-fit").click();
+}
+
+// ================= 保守カルテとの連携(埋め込み時) =================
+// 親(受注顧客管理)とは同じオリジンでだけやり取りする
+function diagramData() { return { title: $("title").value, devices: state.devices, conns: state.conns }; }
+let savedSnapshot = "";
+function isDirty() { return JSON.stringify(diagramData()) !== savedSnapshot; }
+function toParent(msg) { window.parent.postMessage(msg, location.origin); }
+
+if (EMBED) {
+  window.addEventListener("message", e => {
+    if (e.origin !== location.origin || e.source !== window.parent) return;
+    const m = e.data || {};
+    if (m.type === "netmap:load") {
+      const d = m.data;
+      if (d && Array.isArray(d.devices)) loadDiagram(d);
+      else {
+        loadDiagram({ title: (m.customerName ? m.customerName + " " : "") + "ネットワーク構成図", devices: STARTER_DEVICES, conns: STARTER_CONNS });
+      }
+      savedSnapshot = (d && Array.isArray(d.devices)) ? JSON.stringify(diagramData()) : "";
+    } else if (m.type === "netmap:saved") {
+      savedSnapshot = JSON.stringify(diagramData());
+      $("save-msg").textContent = "保存しました " + new Date().toTimeString().slice(0, 5);
+      $("btn-store").disabled = false;
+    } else if (m.type === "netmap:save-failed") {
+      $("save-msg").textContent = "";
+      $("btn-store").disabled = false;
+    }
+  });
+  $("btn-store").onclick = () => {
+    $("btn-store").disabled = true;
+    $("save-msg").textContent = "保存中…";
+    toParent({ type: "netmap:save", data: JSON.parse(JSON.stringify(diagramData())) });
+  };
+  $("btn-close").onclick = () => {
+    if (isDirty() && !confirm("保存していない変更があります。閉じると変更は失われます。閉じますか？")) return;
+    toParent({ type: "netmap:close" });
+  };
+  window.addEventListener("resize", () => { if (READONLY) $("btn-fit").click(); });
+  toParent({ type: "netmap:ready", readonly: READONLY });
+}
+
+// 初期描画
+renderDiagram();
+</script>
+</body>
+</html>
