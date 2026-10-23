@@ -370,6 +370,12 @@
     }
 
     .blank-cell { background: #f8fafc; }
+    .info-grid.extra-grid { border-top: none; margin-top: -13px; }
+    .extra-grid .extra-value-cell { grid-column: span 3; }
+    .extra-grid .extra-action-cell { grid-column: span 2; justify-content: flex-end; gap: 8px; background: #f8fafc; }
+    .extra-grid .label-cell .extra-label-input { text-align: center; font-weight: 900; color: #17325e; background: rgba(255,255,255,.7); }
+    .extra-tel { font-size: 12px; font-weight: 800; color: #1d4ed8; text-decoration: none; padding: 4px 8px; border: 1px solid #bfdbfe; border-radius: 8px; background: #eff6ff; }
+    .extra-btns { display: flex; gap: 8px; flex-wrap: wrap; margin: -4px 0 14px; }
 
     .items-wrap,
     .purchase-wrap {
@@ -2322,6 +2328,10 @@
         display: none !important;
       }
 
+      .info-grid.extra-grid { margin-top: -12px !important; }
+      .extra-grid .extra-value-cell { grid-column: auto !important; }
+      .extra-grid .extra-action-cell { grid-column: 1 / -1 !important; min-height: 36px !important; }
+
       .info-grid input,
       .info-grid select,
       .info-grid .excel-input {
@@ -3776,7 +3786,8 @@
       [["住所", "address", "text"], ["本社番号", "headOfficePhone", "text"], ["失注日", "lostDate", "text"]],
       [["契約者名", "contractorName", "text"], ["連絡先", "contractorPhone", "text"], ["生年月日", "contractorBirth", "date"]],
       [["申込者名", "applicantName", "text"], ["連絡先", "applicantPhone", "text"], ["生年月日", "applicantBirth", "date"]],
-      [["申込プラン", "plan", "text"], ["メアド", "email", "text"], ["契約書受渡（発送）日", "documentHandoverDate", "date"]],
+      // 申込プラン(plan)は画面から外した（既存データはFirestoreに残る）
+      [["メアド", "email", "text"], ["契約書受渡（発送）日", "documentHandoverDate", "date"], ["", "", "blank"]],
       [["割引", "discount", "text"], ["進捗ステータス", "progressStatus", "select", OPTIONS.progress], ["入金予定日", "paymentDate", "date"]],
       [["リマインダー日", "reminderDate", "date"], ["リマイン内容", "reminderText", "text"], ["", "", "blank"]],
       [["Wi-Fi SSID", "wifiSsid", "text"], ["Wi-Fi パスワード", "wifiPassword", "text"], ["", "", "blank"]]
@@ -4052,6 +4063,10 @@
             // items / purchase は構造が複雑なため、変化があれば丸ごと差し替え
             if (JSON.stringify(record.items || []) !== JSON.stringify(prev.items || [])) patch.items = record.items || [];
             if (JSON.stringify(record.purchase || {}) !== JSON.stringify(prev.purchase || {})) patch.purchase = record.purchase || {};
+            // ボタンで追加する欄（携帯番号・追加項目）も変化があれば丸ごと差し替え
+            ["mobiles", "extraFields"].forEach(k => {
+              if (JSON.stringify(record[k] || []) !== JSON.stringify(prev[k] || [])) patch[k] = record[k] || [];
+            });
             batch.update(ref, patch);
           }
 
@@ -4806,7 +4821,9 @@ ${wifiHtml}
       filteredIndexes = records.map((record, index) => ({ record, index })).filter(entry => {
         const r = entry.record;
         const itemValues = (r.items || []).reduce((acc, item) => acc.concat(Object.values(item)), []);
-        const target = [r.sheetName].concat(Object.values(r.fields || {})).concat(itemValues).join(" ").toLowerCase();
+        const extraValues = (r.mobiles || []).reduce((acc, m) => acc.concat([m.number, m.owner]), [])
+          .concat((r.extraFields || []).reduce((acc, x) => acc.concat([x.label, x.value]), []));
+        const target = [r.sheetName].concat(Object.values(r.fields || {})).concat(itemValues).concat(extraValues).join(" ").toLowerCase();
         const keywordOk = !keyword || target.includes(keyword);
         const statusOk = !status || r.fields.progressStatus === status;
         return keywordOk && statusOk;
@@ -4847,7 +4864,42 @@ ${wifiHtml}
           if (!label) return `<div class="cell blank-cell"></div><div class="cell blank-cell"></div>`;
           return `<div class="cell label-cell">${esc(label)}</div><div class="cell">${renderInput(field, record.fields[field], kind, options)}</div>`;
         }).join("")).join("")}
-      </div>`;
+      </div>${renderExtraGrid(record)}`;
+    }
+
+    // ---- 案件ごとにボタンで足せる欄 ----
+    // record.mobiles = [{ number, owner }]（携帯番号と誰の番号か）
+    // record.extraFields = [{ label, value }]（項目名も自由に付けられる追加項目）
+    function renderExtraGrid(record) {
+      const mobiles = record.mobiles || [];
+      const extras = record.extraFields || [];
+      const telA = n => {
+        const d = String(n || "").replace(/[^0-9+]/g, "");
+        return d ? `<a class="extra-tel" href="tel:${esc(d)}">発信</a>` : "";
+      };
+      const mobileRows = mobiles.map((m, i) =>
+        `<div class="cell label-cell">携帯番号</div>` +
+        `<div class="cell"><input type="tel" class="excel-input" data-mobile="${i}" data-mobile-field="number" value="${esc(m.number || "")}" placeholder="090-0000-0000" /></div>` +
+        `<div class="cell label-cell">誰の番号</div>` +
+        `<div class="cell"><input type="text" class="excel-input" data-mobile="${i}" data-mobile-field="owner" value="${esc(m.owner || "")}" placeholder="例: 代表 山田様 / 事務 佐藤様" /></div>` +
+        `<div class="cell extra-action-cell">${telA(m.number)}<button class="btn-danger btn-small" type="button" data-delete-mobile="${i}">削除</button></div>`
+      ).join("");
+      const extraRows = extras.map((x, i) =>
+        `<div class="cell label-cell"><input type="text" class="excel-input extra-label-input" data-extra="${i}" data-extra-field="label" value="${esc(x.label || "")}" placeholder="項目名" /></div>` +
+        `<div class="cell extra-value-cell"><input type="text" class="excel-input" data-extra="${i}" data-extra-field="value" value="${esc(x.value || "")}" placeholder="内容" /></div>` +
+        `<div class="cell extra-action-cell"><button class="btn-danger btn-small" type="button" data-delete-extra="${i}">削除</button></div>`
+      ).join("");
+      const grid = (mobileRows || extraRows) ? `<div class="info-grid extra-grid">${mobileRows}${extraRows}</div>` : "";
+      return grid + `<div class="extra-btns">
+          <button class="btn-ghost btn-small" type="button" id="addMobileBtn">＋携帯番号を追加</button>
+          <button class="btn-ghost btn-small" type="button" id="addExtraFieldBtn">＋項目を追加</button>
+        </div>`;
+    }
+
+    // 追加した行の入力欄にカーソルを置く
+    function focusExtraInput(selector) {
+      const el = document.querySelector(selector);
+      if (el) el.focus();
     }
 
     function tableInput(index, field, value, kind, options, extraClass = "") {
@@ -5249,6 +5301,20 @@ ${wifiHtml}
         renderRecordSelect();
         recalcView();
       }
+      if (target.matches("[data-mobile-field]")) {
+        const m = (record.mobiles || [])[Number(target.dataset.mobile)];
+        if (!m) return;
+        m[target.dataset.mobileField] = target.value;
+        saveRecords();
+        renderRecordSelect();
+      }
+      if (target.matches("[data-extra-field]")) {
+        const x = (record.extraFields || [])[Number(target.dataset.extra)];
+        if (!x) return;
+        x[target.dataset.extraField] = target.value;
+        saveRecords();
+        renderRecordSelect();
+      }
       if (target.matches("[data-item-field]")) {
         const index = Number(target.dataset.item);
         const field = target.dataset.itemField;
@@ -5328,6 +5394,36 @@ ${wifiHtml}
       const record = currentRecord();
       if (target.id === "addItemBtn") {
         record.items.push(blankItem());
+        saveRecords();
+        renderRecord();
+      }
+      if (target.id === "addMobileBtn") {
+        record.mobiles = (record.mobiles || []).concat([{ number: "", owner: "" }]);
+        saveRecords();
+        renderRecord();
+        focusExtraInput(`[data-mobile="${record.mobiles.length - 1}"][data-mobile-field="number"]`);
+      }
+      if (target.id === "addExtraFieldBtn") {
+        record.extraFields = (record.extraFields || []).concat([{ label: "", value: "" }]);
+        saveRecords();
+        renderRecord();
+        focusExtraInput(`[data-extra="${record.extraFields.length - 1}"][data-extra-field="label"]`);
+      }
+      if (target.matches("[data-delete-mobile]")) {
+        const i = Number(target.dataset.deleteMobile);
+        const m = (record.mobiles || [])[i];
+        if (!m) return;
+        if ((m.number || m.owner) && !confirm(`携帯番号「${m.number || ""}${m.owner ? "（" + m.owner + "）" : ""}」を削除しますか？`)) return;
+        record.mobiles.splice(i, 1);
+        saveRecords();
+        renderRecord();
+      }
+      if (target.matches("[data-delete-extra]")) {
+        const i = Number(target.dataset.deleteExtra);
+        const x = (record.extraFields || [])[i];
+        if (!x) return;
+        if ((x.label || x.value) && !confirm(`項目「${x.label || "（項目名なし）"}」を削除しますか？`)) return;
+        record.extraFields.splice(i, 1);
         saveRecords();
         renderRecord();
       }
