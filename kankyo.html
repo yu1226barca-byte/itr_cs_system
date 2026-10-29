@@ -3806,8 +3806,8 @@
       [["顧客名", "customerName", "text"], ["工事予定日", "constructionDate", "date"], ["リース会社", "leaseCompany", "select", OPTIONS.leaseCompanies]],
       [["屋号", "tradeName", "text"], ["設立日", "establishedDate", "date"], ["資本金", "capital", "text"]],
       [["住所", "address", "text"], ["本社番号", "headOfficePhone", "text"], ["失注日", "lostDate", "text"]],
-      [["契約者名", "contractorName", "text"], ["連絡先", "contractorPhone", "text"], ["生年月日", "contractorBirth", "date"]],
-      [["申込者名", "applicantName", "text"], ["連絡先", "applicantPhone", "text"], ["生年月日", "applicantBirth", "date"]],
+      [["契約者名", "contractorName", "text"], ["契約者連絡先", "contractorPhone", "text"], ["契約者生年月日", "contractorBirth", "date"]],
+      [["担当者名", "applicantName", "text"], ["担当者連絡先", "applicantPhone", "text"], ["担当者生年月日", "applicantBirth", "date"]],
       // 申込プラン(plan)は画面から外した（既存データはFirestoreに残る）
       [["メアド", "email", "text"], ["契約書受渡（発送）日", "documentHandoverDate", "date"], ["", "", "blank"]],
       [["割引", "discount", "text"], ["進捗ステータス", "progressStatus", "select", OPTIONS.progress], ["入金予定日", "paymentDate", "date"]],
@@ -4562,9 +4562,9 @@ ${wifiHtml}
       lines.push("住所：" + (v(f.address) || "-"));
       lines.push("電話番号：" + (v(f.headOfficePhone) || "-"));
       const mob1 = v(f.contractorPhone), mob2 = v(f.applicantPhone);
-      lines.push("携帯番号：" + (mob1 || mob2 || "-") + (mob1 && mob2 && mob1 !== mob2 ? "（申込者 " + mob2 + "）" : ""));
+      lines.push("携帯番号：" + (mob1 || mob2 || "-") + (mob1 && mob2 && mob1 !== mob2 ? "（担当者 " + mob2 + "）" : ""));
       lines.push("代表者：" + (v(f.contractorName) || "-") + (v(f.contractorBirth) ? "（生年月日 " + calSlashDate(f.contractorBirth) + "）" : ""));
-      lines.push("申込者：" + (v(f.applicantName) || "-") + (v(f.applicantBirth) ? "（生年月日 " + calSlashDate(f.applicantBirth) + "）" : ""));
+      lines.push("担当者：" + (v(f.applicantName) || "-") + (v(f.applicantBirth) ? "（生年月日 " + calSlashDate(f.applicantBirth) + "）" : ""));
       lines.push("リース会社：" + (v(f.leaseCompany) || v(record.purchase && record.purchase.company) || "-"));
       if (v(memo)) { lines.push(""); lines.push("■メモ"); lines.push(v(memo)); }
       lines.push("");
@@ -4869,8 +4869,8 @@ ${wifiHtml}
           ${inp("住所", "apAddress", d.address)}
           ${inp("本社番号", "apHeadOfficePhone", d.headOfficePhone)}
           ${inp("契約者名", "apContractorName", d.contractorName)}
-          ${inp("連絡先", "apContractorPhone", d.contractorPhone)}
-          ${inp("生年月日", "apContractorBirth", d.contractorBirth, "date")}
+          ${inp("契約者連絡先", "apContractorPhone", d.contractorPhone)}
+          ${inp("契約者生年月日", "apContractorBirth", d.contractorBirth, "date")}
           ${sel("リース回数", "apTimes", OPTIONS.times, d.times)}
           ${inp("月額（税別）", "apMonthly", d.monthly)}
         </div>
