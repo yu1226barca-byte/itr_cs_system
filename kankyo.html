@@ -266,6 +266,26 @@
       #calModal .cal-actions button { flex: 1; min-height: 44px; }
     }
     @media print { #calModal { display: none; } }
+    /* アプラス申込書PDFから新規作成（カードの見た目は #calModal と共通） */
+    #aplusModal { position: fixed; inset: 0; background: rgba(15, 23, 42, .45); z-index: 300; display: flex; align-items: center; justify-content: center; padding: 16px; }
+    #aplusModal .cal-card { background: #fff; border-radius: 18px; box-shadow: 0 20px 50px rgba(15,23,42,.25); width: min(720px, 96vw); max-height: 92vh; overflow: auto; padding: 16px 18px; }
+    #aplusModal .cal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    #aplusModal .cal-sub { font-size: 11px; font-weight: 900; color: var(--muted); margin: 12px 0 4px; }
+    #aplusModal .cal-items { max-height: 160px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 10px; }
+    #aplusModal .cal-warn { margin-top: 8px; color: #b45309; background: #fffbeb; border-radius: 8px; padding: 6px 10px; font-size: 12px; font-weight: 700; }
+    #aplusModal .cal-note { font-size: 11px; color: var(--muted); margin-top: 8px; line-height: 1.5; }
+    #aplusModal .cal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+    #aplusModal .aplus-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    #aplusModal .aplus-grid label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; font-weight: 900; color: var(--muted); }
+    #aplusModal .aplus-drop { display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 6px; border: 2px dashed #cbd5e1; border-radius: 12px; padding: 18px; font-size: 13px; font-weight: 700; color: #475569; cursor: pointer; text-align: center; }
+    #aplusModal .aplus-drop.over { border-color: var(--blue); background: var(--blue-soft); }
+    @media (max-width: 760px) {
+      #aplusModal { align-items: flex-start; padding: 8px; }
+      #aplusModal .aplus-grid { grid-template-columns: 1fr 1fr; }
+      #aplusModal input, #aplusModal select { font-size: 16px; }
+      #aplusModal .cal-actions button { flex: 1; min-height: 44px; }
+    }
+    @media print { #aplusModal { display: none; } }
     .btn-note { background: var(--purple-soft); color: var(--purple); }
 
     .workbook {
@@ -3437,6 +3457,7 @@
         <option value="">全ステータス</option>
       </select>
       <button class="btn-primary" id="newRecordBtn">＋新規</button>
+      <button class="btn-primary" id="aplusImportBtn" type="button">📄 申込書PDFから新規</button>
       <button class="btn-ghost" id="duplicateBtn">複製</button>
       <button class="btn-ghost" id="csvBtn">CSV出力</button>
       <button class="btn-primary" id="deliveryPdfBtn" type="button">納品書PDF</button>
@@ -3778,11 +3799,12 @@
     let currentIndex = 0;
     let activeNote = { index: null };
 
-     const dateFields = new Set(["applicationDate", "inspectionDate", "constructionDate", "contractorBirth", "applicantBirth", "paymentDate", "documentHandoverDate", "reminderDate"]);
+     const dateFields = new Set(["applicationDate", "inspectionDate", "constructionDate", "contractorBirth", "applicantBirth", "paymentDate", "documentHandoverDate", "reminderDate", "establishedDate"]);
 
     const fieldRows = [
       [["商流", "route", "select", OPTIONS.routes], ["申込日", "applicationDate", "date"], ["検収日", "inspectionDate", "date"]],
-      [["屋号", "customerName", "text"], ["工事予定日", "constructionDate", "date"], ["リース会社", "leaseCompany", "select", OPTIONS.leaseCompanies]],
+      [["顧客名", "customerName", "text"], ["工事予定日", "constructionDate", "date"], ["リース会社", "leaseCompany", "select", OPTIONS.leaseCompanies]],
+      [["屋号", "tradeName", "text"], ["設立日", "establishedDate", "date"], ["資本金", "capital", "text"]],
       [["住所", "address", "text"], ["本社番号", "headOfficePhone", "text"], ["失注日", "lostDate", "text"]],
       [["契約者名", "contractorName", "text"], ["連絡先", "contractorPhone", "text"], ["生年月日", "contractorBirth", "date"]],
       [["申込者名", "applicantName", "text"], ["連絡先", "applicantPhone", "text"], ["生年月日", "applicantBirth", "date"]],
@@ -3846,6 +3868,7 @@
         record.fields.applicantBirth = normalizeDate(record.fields.applicantBirth);
         record.fields.documentHandoverDate = normalizeDate(record.fields.documentHandoverDate); // この1行を追加
         record.fields.reminderDate = normalizeDate(record.fields.reminderDate);
+        record.fields.establishedDate = normalizeDate(record.fields.establishedDate);
         record.items = (record.items || [blankItem()]).map(item => {
           item.type = normalizeType(item.type);
           item.deliveryDate = normalizeDate(item.deliveryDate);
@@ -4225,6 +4248,9 @@
           applicationDate: d,
           inspectionDate: "",
           customerName: "新規顧客",
+          tradeName: "",
+          establishedDate: "",
+          capital: "",
           constructionDate: "",
           leaseCompany: "アプラス",
           address: "",
@@ -4531,7 +4557,8 @@ ${wifiHtml}
       else lines.push("（未選択）");
       lines.push("");
       lines.push("■お客様");
-      lines.push("屋号：" + (v(f.customerName) || "-"));
+      lines.push("顧客名：" + (v(f.customerName) || "-"));
+      if (v(f.tradeName)) lines.push("屋号：" + v(f.tradeName));
       lines.push("住所：" + (v(f.address) || "-"));
       lines.push("電話番号：" + (v(f.headOfficePhone) || "-"));
       const mob1 = v(f.contractorPhone), mob2 = v(f.applicantPhone);
@@ -4643,6 +4670,254 @@ ${wifiHtml}
     function closeConstructionCalendar() {
       const el = document.getElementById("calModal");
       if (el) el.remove();
+    }
+
+    // ===== アプラスのWEB申込書（ベンダーリース 昭和リース提携型・2024年9月改訂版）のPDFから新規案件を作る =====
+    // PDFはこのブラウザの中だけで読む（どこにも送らない）。入力済みの文字の位置（ページ左上からのpt）で欄を見分ける。
+    // 様式が変わって位置がずれたら APLUS_BOXES を直す。個人事業主の欄は見本が無く、様式の図から位置を推定している
+    const PDFJS_SRC = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+    const PDFJS_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    const APLUS_BOXES = {            // [左, 右, 上, 下]
+      appDate:   [430, 565, 66, 90],  // お申込み年月日
+      corpName:  [40, 215, 183, 207], // 法人: 商号
+      estab:     [270, 372, 168, 188],// 法人: 設立
+      industry:  [270, 372, 190, 207],
+      employees: [270, 372, 208, 226],
+      sales:     [270, 372, 227, 245],
+      corpPhone: [270, 372, 246, 264],
+      repName:   [40, 250, 245, 263], // 法人: 代表者
+      hqAddr:    [45, 262, 278, 302], // 法人: 本社所在地
+      indName:   [40, 245, 309, 332], // 個人: お名前
+      indBirth:  [270, 372, 306, 334],
+      indHome:   [80, 200, 334, 349],
+      indMobile: [250, 372, 334, 349],
+      indTrade:  [60, 210, 380, 396], // 個人: 名称（屋号）
+      indShopTel:[214, 372, 369, 384],
+      indFound:  [214, 290, 384, 397],// 個人: 創業
+      indAddr:   [60, 210, 396, 424], // 個人: 店舗住所
+      indHomeAddr:[45, 250, 354, 372],
+      g1Name:    [40, 205, 575, 594], // 連帯保証人予定者（1人目）
+      g1Birth:   [272, 372, 564, 579],
+      g1Home:    [270, 372, 579, 591],
+      g1Mobile:  [270, 372, 591, 606],
+      months:    [395, 440, 433, 458], // リース期間
+      monthly:   [465, 565, 455, 474], // ①リース料（税別）
+      staff:     [425, 525, 733, 749]  // 販売店 担当者氏名
+    };
+    const APLUS_ITEM_STEP = 48.7;      // 物件Ⅰ→Ⅱ→Ⅲ の縦の間隔
+
+    function aplusPick(items, box) {
+      const [x0, x1, y0, y1] = box;
+      return items.filter(t => t.x >= x0 && t.x < x1 && t.top >= y0 && t.top < y1)
+        .sort((a, b) => (a.top - b.top) || (a.x - b.x));
+    }
+    function aplusText(items, box) {
+      return aplusPick(items, box).map(t => t.s).join(" ").replace(/[\s　]+/g, " ").trim();
+    }
+    function aplusNums(s) { return (String(s).match(/\d+/g) || []).map(Number); }
+    function aplusIso(y, m, d) {
+      if (!y || !m || !d || m > 12 || d > 31) return "";
+      return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    }
+    function aplusDate(s) {          // 「2023 1 6」「昭和 56年 5月 7日」
+      const t = String(s || "");
+      const era = { "明治": 1867, "大正": 1911, "昭和": 1925, "平成": 1988, "令和": 2018 };
+      const e = Object.keys(era).find(k => t.includes(k));
+      const n = aplusNums(t);
+      if (n.length < 3) return "";
+      return aplusIso(e ? era[e] + n[0] : n[0], n[1], n[2]);
+    }
+    function aplusPhone(s) {
+      const t = String(s || "").normalize("NFKC").replace(/\s/g, "");
+      return /^[\d-]{10,13}$/.test(t) ? t : "";
+    }
+    function aplusName(s) { return String(s || "").replace(/ /g, "　"); } // 姓名の間は全角スペース（申込書の表記どおり）
+    function aplusSameName(a, b) {
+      const k = v => String(v || "").replace(/[\s　]/g, "");
+      return !!k(a) && k(a) === k(b);
+    }
+
+    // items: [{s, x, top}]（1ページ目）→ 案件の下書き
+    function aplusParse(items) {
+      const T = key => aplusText(items, APLUS_BOXES[key]);
+      const corpName = T("corpName");
+      const kind = corpName ? "法人" : "個人";
+      const indName = aplusName(T("indName"));
+      const contractorName = kind === "法人" ? aplusName(T("repName")) : indName;
+      const g1Name = aplusName(T("g1Name"));
+      const g1 = aplusSameName(g1Name, contractorName); // 連帯保証人＝代表者なら生年月日・携帯を契約者に使う
+      const tradeName = kind === "個人" ? T("indTrade") : "";
+      const staff = T("staff");
+      const months = aplusNums(T("months"))[0];
+      const goods = [0, 1, 2].map(k => {
+        const dy = k * APLUS_ITEM_STEP;
+        const band = (y0, y1, x0 = 415, x1 = 525) => aplusText(items, [x0, x1, y0 + dy, y1 + dy]);
+        return { maker: band(122, 138), product: band(138, 154), model: band(154, 170), qty: band(150, 172, 525, 565) };
+      }).filter(g => g.maker || g.product || g.model);
+      return {
+        kind,
+        applicationDate: aplusDate(T("appDate")),
+        customerName: kind === "法人" ? corpName : (tradeName || indName),
+        tradeName,
+        establishedDate: aplusDate(kind === "法人" ? T("estab") : T("indFound")),
+        capital: "",
+        address: kind === "法人" ? T("hqAddr") : (T("indAddr") || T("indHomeAddr")),
+        headOfficePhone: aplusPhone(kind === "法人" ? T("corpPhone") : (T("indShopTel") || T("indHome"))),
+        contractorName,
+        contractorPhone: kind === "個人" ? aplusPhone(T("indMobile")) || (g1 ? aplusPhone(T("g1Mobile")) : "")
+          : (g1 ? aplusPhone(T("g1Mobile")) || aplusPhone(T("g1Home")) : ""),
+        contractorBirth: (kind === "個人" ? aplusDate(T("indBirth")) : "") || (g1 ? aplusDate(T("g1Birth")) : ""),
+        staff,
+        times: months && OPTIONS.times.includes(months + "回") ? months + "回" : "",
+        monthly: String(aplusNums(T("monthly").replace(/,/g, ""))[0] || ""),
+        goods,
+        info: { industry: T("industry"), employees: T("employees"), sales: T("sales") }
+      };
+    }
+
+    function loadPdfJs() {
+      if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+      return new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = PDFJS_SRC;
+        s.onload = () => {
+          if (!window.pdfjsLib) { reject(new Error("PDF読み込み部品を読み込めませんでした")); return; }
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+          resolve(window.pdfjsLib);
+        };
+        s.onerror = () => reject(new Error("PDF読み込み部品を読み込めませんでした（通信を確認してください）"));
+        document.head.appendChild(s);
+      });
+    }
+    async function aplusReadPdf(file) {
+      const lib = await loadPdfJs();
+      const pdf = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+      const page = await pdf.getPage(1);
+      const H = page.getViewport({ scale: 1 }).height;
+      const content = await page.getTextContent();
+      return content.items.filter(t => String(t.str || "").trim())
+        .map(t => ({ s: t.str, x: t.transform[4], top: H - t.transform[5] - (t.height || Math.abs(t.transform[3])) }));
+    }
+
+    function aplusNameKey(v) {
+      return String(v || "").normalize("NFKC").replace(/株式会社|有限会社|合同会社|\(株\)|\(有\)|[\s　・.,]/g, "");
+    }
+    function openAplusImport() {
+      closeAplusImport();
+      const el = document.createElement("div");
+      el.id = "aplusModal";
+      el.innerHTML = `<div class="cal-card">
+        <div class="cal-head"><strong>📄 アプラス申込書PDFから新規作成</strong><button class="btn-ghost btn-small" type="button" id="aplusCloseBtn">✕ 閉じる</button></div>
+        <label class="aplus-drop" id="aplusDrop"><input type="file" id="aplusFile" accept="application/pdf,.pdf"><span>申込書のPDFを選ぶか、ここにドロップ</span></label>
+        <div class="cal-note">PDFはこのブラウザの中だけで読み取ります（どこにも送信しません）。読み取った内容を確認・修正してから作成してください。</div>
+        <div id="aplusResult"></div>
+      </div>`;
+      document.body.appendChild(el);
+      el.addEventListener("click", e => { if (e.target === el) closeAplusImport(); });
+      document.getElementById("aplusCloseBtn").onclick = closeAplusImport;
+      const drop = document.getElementById("aplusDrop");
+      drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("over"); });
+      drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+      drop.addEventListener("drop", e => {
+        e.preventDefault(); drop.classList.remove("over");
+        const f = e.dataTransfer.files && e.dataTransfer.files[0];
+        if (f) aplusHandleFile(f);
+      });
+      document.getElementById("aplusFile").addEventListener("change", e => {
+        const f = e.target.files && e.target.files[0];
+        if (f) aplusHandleFile(f);
+      });
+    }
+    function closeAplusImport() {
+      const el = document.getElementById("aplusModal");
+      if (el) el.remove();
+    }
+    async function aplusHandleFile(file) {
+      const box = document.getElementById("aplusResult");
+      if (!box) return;
+      box.innerHTML = `<div class="cal-note">読み取り中…</div>`;
+      let d;
+      try {
+        d = aplusParse(await aplusReadPdf(file));
+      } catch (err) {
+        box.innerHTML = `<div class="cal-warn">読み取れませんでした: ${esc(err && err.message || err)}</div>`;
+        return;
+      }
+      if (!d.customerName && !d.contractorName) {
+        box.innerHTML = `<div class="cal-warn">申込書の文字が見つかりませんでした。アプラスのWEB申込書（入力済みのPDF）か確認してください。紙をスキャンしたPDFは読めません。</div>`;
+        return;
+      }
+      const key = aplusNameKey(d.customerName);
+      const dup = key ? records.filter(r => aplusNameKey(r.fields && r.fields.customerName) === key) : [];
+      const inp = (label, id, value, type = "text") =>
+        `<label>${esc(label)}<input type="${type}" id="${id}" value="${esc(value)}"></label>`;
+      const sel = (label, id, options, value) =>
+        `<label>${esc(label)}<select id="${id}">${optionList(options, value)}</select></label>`;
+      const info = [["業種", d.info.industry], ["従業員数", d.info.employees], ["売上高", d.info.sales]]
+        .filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join("／");
+      box.innerHTML = `
+        ${dup.length ? `<div class="cal-warn">同じ顧客名の案件がすでに${dup.length}件あります（${esc(dup.map(r => r.fields.progressStatus || "未設定").join("、"))}）。リピートでなければ作成しないでください。</div>` : ""}
+        ${d.kind === "個人" ? `<div class="cal-warn">個人事業主の申込書です。個人事業主の欄は読み取り位置が未確認なので、特に念入りに確認してください。</div>` : ""}
+        <div class="cal-sub">顧客・案件情報（${esc(d.kind)}）</div>
+        <div class="aplus-grid">
+          ${inp("申込日", "apApplicationDate", d.applicationDate, "date")}
+          ${sel("商流（選んでください）", "apRoute", OPTIONS.routes, "")}
+          ${inp("顧客名", "apCustomerName", d.customerName)}
+          ${inp("屋号", "apTradeName", d.tradeName)}
+          ${inp("設立日", "apEstablishedDate", d.establishedDate, "date")}
+          ${inp("資本金", "apCapital", d.capital)}
+          ${inp("住所", "apAddress", d.address)}
+          ${inp("本社番号", "apHeadOfficePhone", d.headOfficePhone)}
+          ${inp("契約者名", "apContractorName", d.contractorName)}
+          ${inp("連絡先", "apContractorPhone", d.contractorPhone)}
+          ${inp("生年月日", "apContractorBirth", d.contractorBirth, "date")}
+          ${sel("リース回数", "apTimes", OPTIONS.times, d.times)}
+          ${inp("月額（税別）", "apMonthly", d.monthly)}
+        </div>
+        ${info ? `<div class="cal-note">申込書の記載: ${esc(info)}${d.staff ? "／販売店担当 " + esc(d.staff) : ""}</div>` : ""}
+        <div class="cal-note">資本金は申込書に欄が無いので、分かれば手で入れてください（申込書にあるのは売上高）。</div>
+        <div class="cal-sub">物件（明細に入ります。仕入れ先・仕切り単価は作成後に入力）</div>
+        <div class="cal-items">${d.goods.length ? d.goods.map(g => `<div class="di-row"><span class="di-text">${esc(calItemLine({ product: g.product, maker: g.maker, model: g.model, qty: g.qty }).slice(1))}</span></div>`).join("") : `<div class="search-empty">物件の記載がありません。</div>`}</div>
+        <div class="cal-actions"><button class="btn-ghost" type="button" id="aplusCancelBtn">キャンセル</button><button class="btn-primary" type="button" id="aplusCreateBtn">この内容で新規作成</button></div>`;
+      document.getElementById("aplusCancelBtn").onclick = closeAplusImport;
+      document.getElementById("aplusCreateBtn").onclick = () => aplusCreateRecord(d);
+    }
+    function aplusCreateRecord(d) {
+      const val = id => String(document.getElementById(id).value || "").trim();
+      const name = val("apCustomerName");
+      if (!name) { alert("顧客名を入れてください。"); return; }
+      const record = createBlankRecord();
+      record.id = newRecordId(records.length);
+      Object.assign(record.fields, {
+        route: val("apRoute"),
+        applicationDate: normalizeDate(val("apApplicationDate")) || record.fields.applicationDate,
+        customerName: name,
+        tradeName: val("apTradeName"),
+        establishedDate: normalizeDate(val("apEstablishedDate")),
+        capital: val("apCapital"),
+        address: val("apAddress"),
+        headOfficePhone: val("apHeadOfficePhone"),
+        contractorName: val("apContractorName"),
+        contractorPhone: val("apContractorPhone"),
+        contractorBirth: normalizeDate(val("apContractorBirth")),
+        leaseCompany: "アプラス"
+      });
+      record.sheetName = name;
+      record.purchase.company = "アプラス";
+      if (val("apTimes")) record.purchase.times = val("apTimes");
+      record.purchase.monthly = val("apMonthly").replace(/[,，円\s]/g, "");
+      if (d.goods.length) {
+        record.items = d.goods.map(g => Object.assign(blankItem(), {
+          product: g.product, maker: g.maker, model: g.model, qty: String(aplusNums(g.qty)[0] || 1)
+        }));
+      }
+      // 業種・従業員数・売上高は画面に欄が無いので、受注連携の apoInfo と同じく画面に出さない項目として残す
+      record.aplusInfo = Object.assign({ kind: d.kind, staff: d.staff, importedAt: new Date().toISOString() }, d.info);
+      closeAplusImport();
+      records.push(record);
+      currentIndex = records.length - 1;
+      saveRecords();
+      renderRecord();
     }
 
     function closeDeliveryItemPicker() {
@@ -5490,6 +5765,8 @@ ${wifiHtml}
       saveRecords();
       renderRecord();
     });
+
+    document.getElementById("aplusImportBtn").addEventListener("click", openAplusImport);
 
     document.getElementById("duplicateBtn").addEventListener("click", () => {
       const copy = deepCopy(currentRecord());
