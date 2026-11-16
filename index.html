@@ -3462,6 +3462,7 @@
       <button class="btn-ghost" id="csvBtn">CSV出力</button>
       <button class="btn-primary" id="deliveryPdfBtn" type="button">納品書PDF</button>
       <button class="btn-primary" id="calendarBtn" type="button">📅 工事日程</button>
+      <button class="btn-ghost" id="uriageSyncBtn" type="button" title="10分おきの自動転記を待たずに、月間売上管理表（売上一覧）へ今すぐ反映します">📊 売上表へ反映</button>
       <button class="btn-danger" id="deleteRecordBtn">削除</button>
     </div>
 
@@ -5767,6 +5768,56 @@ ${wifiHtml}
     });
 
     document.getElementById("aplusImportBtn").addEventListener("click", openAplusImport);
+    document.getElementById("uriageSyncBtn").addEventListener("click", runUriageSync);
+
+    // ===== 月間売上管理表へ今すぐ反映（2026-11-16） =====
+    // 本来は GAS（審査結果連携の 売上表転記.js）が10分おきに転記する。このボタンはそれを今すぐ動かすだけ。
+    // ログイン中のトークンを送り、GAS 側で Firebase に問い合わせて本人確認する（秘密情報はページに置かない）
+    const URIAGE_SYNC_URL = "https://script.google.com/macros/s/AKfycbxHtSifeM-0p5q9yMa3nlKQletA5QzJfYI7qwwXtEXjRWPfQVfpVd649T8SaVQnjWobsQ/exec";
+
+    async function runUriageSync() {
+      const btn = document.getElementById("uriageSyncBtn");
+      if (!currentUser || !cloudReady) { alert("クラウドにつながっていないため反映できません。ログインしてから押してください。"); return; }
+      const label = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "反映中…";
+      try {
+        // 先に、まだ送っていない編集をクラウドへ保存する（GAS はクラウドの内容を読むため）
+        clearTimeout(cloudSaveTimer);
+        await saveAllRecordsToCloud();
+        if (/エラー/.test((document.getElementById("saveState") || {}).textContent || "")) {
+          throw new Error("クラウドへの保存に失敗しました。通信を確かめてからもう一度押してください");
+        }
+        const idToken = await currentUser.getIdToken();
+        const res = await fetch(URIAGE_SYNC_URL, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },   // プリフライトを起こさない形で送る
+          body: JSON.stringify({ action: "uriageSync", idToken })
+        });
+        const r = await res.json();
+        alert(uriageSyncMessage(r));
+      } catch (e) {
+        alert("売上表への反映に失敗しました：" + (e && e.message || e));
+      } finally {
+        btn.disabled = false;
+        btn.textContent = label;
+      }
+    }
+
+    function uriageSyncMessage(r) {
+      if (!r || !r.ok) return "反映できませんでした：" + ((r && r.error) || "不明なエラー");
+      if (r.seeded) return "初回のため、今ある" + r.seeded + "件を「転記済み」として記録しました（売上表には書いていません）。\n次からは新しい案件が売上表に入ります。";
+      const d = r.detail || {};
+      const out = [];
+      const block = (title, list) => { if (list && list.length) out.push("■ " + title + "（" + list.length + "件）\n" + list.map(s => "・" + s).join("\n")); };
+      block("売上表に足しました", d.added);
+      block("書き直しました", d.updated);
+      block("確認してください", d.problems);
+      block("受注顧客管理から消えた案件（売上表はそのまま）", d.gone);
+      return out.length ? out.join("\n\n")
+        : "新しく反映するものはありませんでした。\n（顧客名・申込日・月額と料率（現金販売は販売額）がそろっていない案件は、そろうまで待ちます）";
+    }
+
 
     document.getElementById("duplicateBtn").addEventListener("click", () => {
       const copy = deepCopy(currentRecord());
