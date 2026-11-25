@@ -3362,6 +3362,11 @@
     .di-row:hover { background: #f1f5f9; }
     .di-row input { margin-top: 2px; width: 16px; height: 16px; flex: none; }
     .di-wifi { padding: 0 18px 10px; }
+    .di-name { padding: 12px 18px 4px; display: grid; gap: 6px; }
+    .di-name label { font-size: 13px; font-weight: 700; color: #0f172a; }
+    .di-name input { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px; }
+    .di-name .di-name-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .di-name .di-name-chips:empty { display: none; }
     .di-wifi:empty { display: none; }
     .di-text { font-size: 13px; color: #0f172a; line-height: 1.5; }
     .di-type { display: inline-block; font-size: 11px; font-weight: 700; color: #1e3a8a; background: #dbeafe; border-radius: 9999px; padding: 1px 8px; margin-right: 6px; }
@@ -3521,6 +3526,12 @@
         <button class="btn-ghost btn-small" id="deliveryItemCloseBtn" type="button">閉じる</button>
       </div>
       <div class="modal-body">
+        <div class="di-name">
+          <label for="deliveryNameInput">宛名（屋号）</label>
+          <input type="text" id="deliveryNameInput" maxlength="100" autocomplete="off" />
+          <div class="di-name-chips" id="deliveryNameChips"></div>
+          <span class="di-note" style="font-size:12px;color:#64748b;">末尾に「御中」を付けて印字します（「様」「御中」で終わっていればそのまま）。案件の顧客名は変わりません。</span>
+        </div>
         <div class="di-toolbar">
           <button class="btn-ghost btn-small" id="deliveryItemAllBtn" type="button">すべて選択</button>
           <button class="btn-ghost btn-small" id="deliveryItemNoneBtn" type="button">すべて解除</button>
@@ -4364,8 +4375,10 @@
         const f = record.fields || {};
         // 選択された物品があればそれだけを印字（未指定なら従来どおり自動抽出）
         const items = (selectedItems && selectedItems.length) ? selectedItems : safeDeliveryItems(record);
-        const customerName = f.customerName || record.sheetName || "";
-        const customerWithHonorific = customerName ? `${customerName}　御中` : "";
+        // opts.name: 納品書の画面で書き換えた宛名(未指定なら案件の顧客名)
+        const customerName = String((opts && typeof opts.name === "string") ? opts.name : (f.customerName || record.sheetName || "")).trim();
+        const customerWithHonorific = !customerName ? ""
+          : /(御中|様)$/.test(customerName) ? customerName : `${customerName}　御中`;
         const rows = items.map((item, index) => `
           <tr>
             <td>${index + 1}</td>
@@ -4492,6 +4505,9 @@ ${wifiHtml}
       return out;
     }
 
+    // 納品書の宛名を書き換えた内容(案件IDごと。このページを開いている間だけ覚える)
+    const deliveryNameEdits = {};
+
     function openDeliveryItemPicker() {
       const record = currentRecord();
       if (!record) {
@@ -4499,6 +4515,28 @@ ${wifiHtml}
         return;
       }
       recalcView();
+
+      // 宛名(屋号)。既定は顧客名。屋号欄が別に入っていればボタンで切り替えられる
+      {
+        const f0 = record.fields || {};
+        const base = String(f0.customerName || record.sheetName || "").trim();
+        const trade = String(f0.tradeName || "").trim();
+        const nameInput = document.getElementById("deliveryNameInput");
+        const chips = document.getElementById("deliveryNameChips");
+        if (nameInput) {
+          nameInput.value = Object.prototype.hasOwnProperty.call(deliveryNameEdits, record.id) ? deliveryNameEdits[record.id] : base;
+        }
+        if (chips) {
+          const cands = [["顧客名", base], ["屋号", trade]].filter(([, v]) => v);
+          const uniq = cands.filter(([, v], i) => cands.findIndex(c => c[1] === v) === i);
+          chips.innerHTML = uniq.length > 1 || (uniq.length === 1 && nameInput && nameInput.value !== uniq[0][1])
+            ? uniq.map(([label, v], i) => `<button class="btn-ghost btn-small" type="button" data-dn="${i}">${esc(label)}：${esc(v)}</button>`).join("")
+            : "";
+          chips.querySelectorAll("[data-dn]").forEach(btn => btn.addEventListener("click", () => {
+            if (nameInput) { nameInput.value = uniq[Number(btn.dataset.dn)][1]; nameInput.focus(); }
+          }));
+        }
+      }
 
       const box = document.getElementById("deliveryItemList");
       const idxs = deliveryCandidateIndexes(record);
@@ -4942,7 +4980,12 @@ ${wifiHtml}
         return;
       }
       const wifiCheck = document.getElementById("deliveryWifiCheck");
+      const nameInput = document.getElementById("deliveryNameInput");
       const opts = { wifi: !!(wifiCheck && wifiCheck.checked) };
+      if (nameInput) {
+        opts.name = nameInput.value.trim();
+        deliveryNameEdits[record.id] = opts.name; // 同じ案件で開き直したときは書き換えた宛名を出す
+      }
       closeDeliveryItemPicker(); // 印刷前に必ず閉じる（印刷結果に出さないため）
       createDeliveryPdf(picked.length ? picked : null, opts);
     }
