@@ -3821,7 +3821,7 @@
       [["契約者名", "contractorName", "text"], ["契約者連絡先", "contractorPhone", "text"], ["契約者生年月日", "contractorBirth", "date"]],
       [["担当者名", "applicantName", "text"], ["担当者連絡先", "applicantPhone", "text"], ["担当者生年月日", "applicantBirth", "date"]],
       // 申込プラン(plan)は画面から外した（既存データはFirestoreに残る）
-      [["メアド", "email", "text"], ["契約書受渡（発送）日", "documentHandoverDate", "date"], ["", "", "blank"]],
+      [["メアド", "email", "text"], ["契約書受渡（発送）日", "documentHandoverDate", "date"], ["計上月", "bookingMonth", "month"]],   // 計上月: 月間売上管理表へ転記する月（空なら申込日の月）
       [["割引", "discount", "text"], ["進捗ステータス", "progressStatus", "select", OPTIONS.progress], ["入金予定日", "paymentDate", "date"]],
       [["リマインダー日", "reminderDate", "date"], ["リマイン内容", "reminderText", "text"], ["", "", "blank"]],
       [["Wi-Fi SSID", "wifiSsid", "text"], ["Wi-Fi パスワード", "wifiPassword", "text"], ["", "", "blank"]]
@@ -5171,6 +5171,10 @@ ${wifiHtml}
     function renderInput(field, value, kind, options) {
       if (kind === "select") {
         return `<select class="excel-input" data-field="${field}">${optionList(options, value)}</select>`;
+      }
+      if (kind === "month") {
+        const m = /^\d{4}-\d{2}$/.test(String(value || "")) ? value : "";
+        return `<input type="month" class="excel-input" data-field="${field}" value="${esc(m)}" title="月間売上管理表へ転記する月。空なら申込日の月" />`;
       }
       const type = kind === "date" ? "date" : "text";
       const val = kind === "date" ? normalizeDate(value) : value;
